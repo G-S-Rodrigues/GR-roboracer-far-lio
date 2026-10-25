@@ -60,11 +60,13 @@ install(TARGETS ${PROJECT_NAME}
 if(BUILD_TESTING)
   set(TESTS
     unit_odometry_pipeline
+    unit_3d_golden
   )
   include(GoogleTest)
   foreach(TEST ${TESTS})
     add_executable(${TEST} test/${TEST}.cpp)
     target_link_libraries(${TEST} ${PROJECT_NAME} GTest::gtest_main)
+    target_compile_definitions(${TEST} PRIVATE FARLIO_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
     gtest_discover_tests(${TEST})
   endforeach()
 endif()
