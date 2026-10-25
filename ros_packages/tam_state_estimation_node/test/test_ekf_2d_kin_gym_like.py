@@ -23,7 +23,7 @@ One IMU plus lidar odometry as the only position / orientation / velocity source
               velocity and drifts.
   body_accel  ekf_2d_kin, /imu linear_acceleration in the body frame (a_x = dv/dt = 0,
               a_y = v*w = 0.4 m/s^2, a_z = +9.81), which is what the sim will publish.
-  nh          ekf_2d_nh, zero accel, plus synthetic /vehicle/sensor/wheelspeed_radps
+  nh          ekf_2d_nh, body-frame accel, plus per-wheel speeds from the circle kinematics, plus synthetic /vehicle/sensor/wheelspeed_radps
               (tum_msgs/TUMFloat64PerWheelStamped) and /vehicle/sensor/wheelspeed_status.
 
 It asserts /core/state/odometry >= 0.9 x 100 Hz and records the worst position error.
@@ -51,7 +51,13 @@ PARAMS = os.path.join(os.path.dirname(__file__), 'ekf_2d_gym_like.yml')
 RADIUS = 5.0
 SPEED = 2.0
 RATE = 100.0
+WHEEL_R = 0.058       # f1tenth.urdf wheel radius
+HALF_TRACK = 0.118    # f1tenth.urdf half track
+LR = 0.17145          # base_link to rear axle
+LF = 0.33 - LR        # wheelbase 0.33 m
 VARIANT = os.environ.get('FARLIO_VARIANT', 'zero_accel')
+MIN_ERR_M = float(os.environ.get('FARLIO_MIN_ERR_M', '0'))
+MAX_STAMP_AGE_S = float(os.environ.get('FARLIO_MAX_STAMP_AGE_S', '1.0'))
 MAX_ERR_M = float(os.environ.get('FARLIO_MAX_ERR_M', '0.05'))
 
 
@@ -88,7 +94,7 @@ class TestEkfGymLike(unittest.TestCase):
         received = []
         self.node.create_subscription(
             Odometry, '/core/state/odometry', lambda m: received.append(
-                (time.monotonic(), m)), qos)
+                (time.monotonic(), m, self.node.get_clock().now().nanoseconds)), qos)
 
         omega = SPEED / RADIUS
         pub_wheel = self.node.create_publisher(TUMFloat64PerWheelStamped,
@@ -110,7 +116,7 @@ class TestEkfGymLike(unittest.TestCase):
                 imu.header.stamp = stamp
                 imu.header.frame_id = 'base_link'
                 imu.angular_velocity.z = omega
-                if VARIANT == 'body_accel':
+                if VARIANT in ('body_accel', 'nh'):
                     imu.linear_acceleration.y = SPEED * omega
                     imu.linear_acceleration.z = 9.81
                 pub_imu.publish(imu)
@@ -136,9 +142,14 @@ class TestEkfGymLike(unittest.TestCase):
                 if VARIANT == 'nh':
                     w = TUMFloat64PerWheelStamped()
                     w.stamp = stamp
-                    wr = SPEED / 0.058  # rad/s at a 0.058 m wheel radius (straight-ahead approximation)
-                    w.data.front_left = w.data.front_right = wr
-                    w.data.rear_left = w.data.rear_right = wr
+                    # Per-wheel speeds from the circle's kinematics (left turn, ICR at body y = +R):
+                    # each wheel turns at omega * its distance to the ICR / wheel radius.
+                    def wheel(x, y):
+                        return omega * math.hypot(x, y - RADIUS) / WHEEL_R
+                    w.data.front_left = wheel(LF, HALF_TRACK)
+                    w.data.front_right = wheel(LF, -HALF_TRACK)
+                    w.data.rear_left = wheel(-LR, HALF_TRACK)
+                    w.data.rear_right = wheel(-LR, -HALF_TRACK)
                     pub_wheel.publish(w)
                     pub_wst.publish(st)
                 truth[(stamp.sec, stamp.nanosec)] = (odom.pose.pose.position.x,
@@ -146,12 +157,20 @@ class TestEkfGymLike(unittest.TestCase):
             rclpy.spin_once(self.node, timeout_sec=0.0005)
 
         # the first seconds are initialization; judge the last 4 s
-        window = [m for (tm, m) in received if tm > t0 + 4.0]
+        window = [m for (tm, m, _) in received if tm > t0 + 4.0]
+        recv_ns = [rn for (tm, _, rn) in received if tm > t0 + 4.0]
         self.assertGreater(len(window), 0, 'the EKF published nothing: it never left init/ERROR')
-        span = [tm for (tm, m) in received if tm > t0 + 4.0]
+        span = [tm for (tm, m, _) in received if tm > t0 + 4.0]
         rate = (len(span) - 1) / (span[-1] - span[0])
         self.assertGreaterEqual(rate, 0.9 * RATE, f'odometry rate {rate:.1f} Hz')
         worst = 0.0
+        # Output-stamp lag: how old the stamp is when the message arrives. Stamps must not be
+        # in the future; the age bound is MAX_STAMP_AGE_S.
+        ages = [(rn - (m.header.stamp.sec * 10**9 + m.header.stamp.nanosec)) / 1e9
+                for m, rn in zip(window, recv_ns)]
+        print(f'FARLIO_1050 {VARIANT} stamp age min {min(ages):.4f} max {max(ages):.4f} s')
+        self.assertGreaterEqual(min(ages), -0.001, 'output stamp is in the future')
+        self.assertLessEqual(max(ages), MAX_STAMP_AGE_S, 'output stamp lags too far')
         # Output stamps lag the input by average_delay_ms: compare to the nearest input stamp
         # position error against the closest published truth sample
         keys = sorted(truth)
@@ -162,4 +181,8 @@ class TestEkfGymLike(unittest.TestCase):
             err = math.hypot(m.pose.pose.position.x - x, m.pose.pose.position.y - y)
             worst = max(worst, err)
         print(f'FARLIO_1050 {VARIANT} worst position error {worst:.4f} m')
-        self.assertLessEqual(worst, MAX_ERR_M, f'worst position error {worst:.3f} m')
+        if MIN_ERR_M > 0.0:
+            # characterisation variant: the documented failure must still happen
+            self.assertGreater(worst, MIN_ERR_M, f'expected divergence, worst {worst:.3f} m')
+        else:
+            self.assertLessEqual(worst, MAX_ERR_M, f'worst position error {worst:.3f} m')
