@@ -45,6 +45,7 @@ if(BUILD_TESTING)
   set(TESTS
     unit_icp
     unit_gicp
+    unit_planar_density
   )
   set(TESTS_CUDA
     unit_icp
