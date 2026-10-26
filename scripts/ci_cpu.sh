@@ -8,6 +8,7 @@
 # The committed golden_3d_cpu.txt stays the default for runs without FARLIO_GOLDEN_PATH.
 set -euo pipefail
 set +u  # ROS setup scripts read unset variables
+mkdir -p /dev_ws/out  # CI mounts no volume here; the local run mounts one
 
 # Reference: upstream ef20510 (+ the golden test files), built in its own workspace, with its own deps and
 # its own install prefix, in a subshell that has sourced nothing but ROS. The pipeline is header-only, so a
