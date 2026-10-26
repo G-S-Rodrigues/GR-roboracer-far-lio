@@ -40,6 +40,8 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <laser_geometry/laser_geometry.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/header.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -137,6 +139,20 @@ protected:
    *                                 containing lidar frame as sensor_msgs
    */
   virtual void cloud_callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg_ptr) = 0;
+
+  /**
+   * @brief callback incoming 2D laser scan: project to a point cloud in the scan frame (no TF) and hand it to the
+   * regular cloud callback. Beams that are nan, inf, below range_min or above range_max are dropped by the projection.
+   *
+   * @param[in] scan_ptr           - sensor_msgs::msg::LaserScan::ConstSharedPtr
+   */
+  void scan_callback(const sensor_msgs::msg::LaserScan::ConstSharedPtr scan_ptr)
+  {
+    auto cloud = std::make_shared<sensor_msgs::msg::PointCloud2>();
+    // channel_option::None: x, y, z only (no intensity or index channels)
+    this->laser_projection_.projectLaser(*scan_ptr, *cloud, -1.0, laser_geometry::channel_option::None);
+    this->cloud_callback(cloud);
+  }
 
   /**
    * @brief send diagnostics in case of timeout of incoming ros2 topic
@@ -370,8 +386,14 @@ protected:
     }
 
     // Intialize subscribers and callbacks
-    // Subscribe tof input pointcloud with optional diagnostics
-    if (this->pipeline_->get_diagnostic_config().check_input_status) {
+    if (!this->config_.input_scan.empty()) {
+      // 2D lidar: LaserScan input, same (best-effort) QoS as the pointcloud input
+      topic_watchdog_->add_subscription<sensor_msgs::msg::LaserScan>(this->config_.input_scan, qos_lidar,
+        std::bind(&NodeBase::scan_callback, this, std::placeholders::_1),
+        std::bind(&NodeBase::timeout_callback_pointcloud, this, std::placeholders::_1, std::placeholders::_2),
+        std::chrono::milliseconds(static_cast<int64_t>(500.0)));
+    } else if (this->pipeline_->get_diagnostic_config().check_input_status) {
+      // Subscribe tof input pointcloud with optional diagnostics
       // Both subscriptions need to have the same QoS settings
       auto sub_pc = topic_watchdog_->add_synced_subscription<sensor_msgs::msg::PointCloud2>(
         this->config_.input_pointcloud, qos_lidar);
@@ -440,6 +462,7 @@ protected:
     pmg->declare_parameter("node.cloud_frame", &this->config_.cloud_frame, "", tam::pmg::ParameterType::STRING, "Frame id of the input pointcloud (sensor frame)");  // NOLINT
     pmg->declare_parameter("node.input_pointcloud", &this->config_.input_pointcloud, "/vehicle/sensor/lidar", tam::pmg::ParameterType::STRING, "Topic of the input pointcloud");  // NOLINT
     pmg->declare_parameter("node.input_pointcloud_status", &this->config_.input_pointcloud_status, "/vehicle/sensor/lidar_status", tam::pmg::ParameterType::STRING, "Topic of the input pointcloud status");  // NOLINT
+    pmg->declare_parameter("node.input_scan", &this->config_.input_scan, "", tam::pmg::ParameterType::STRING, "Topic of an input sensor_msgs/LaserScan (2D lidar). Empty: subscribe the pointcloud input instead");  // NOLINT
     pmg->declare_parameter("node.output_odom", &this->config_.output_odom, "/core/state/lidar_odometry", tam::pmg::ParameterType::STRING, "Topic for the odometry output");  // NOLINT
     pmg->declare_parameter("node.input_map", &this->config_.input_map, "/core/map/get_pointcloud_map", tam::pmg::ParameterType::STRING, "Path to a .pcd file to load or name of the GetPointCloudMap service");  // NOLINT
     pmg->declare_parameter("node.update_map_srv", &this->config_.update_map_srv, "", tam::pmg::ParameterType::STRING, "Name of the GetPointCloudMap service for asynchronous map updates. The trigger topic is derived by appending '_ready'. Leave empty to disable.");  // NOLINT
@@ -467,6 +490,8 @@ protected:
   tam::core::TopicWatchdog::UniquePtr topic_watchdog_;
   // odometry pipeline
   std::unique_ptr<OdometryPipeline<TConfig>> pipeline_;
+  // LaserScan to point cloud projection (2D lidar input)
+  laser_geometry::LaserProjection laser_projection_;
   // Static point cloud transform
   Eigen::Isometry3f pc_transform_{};
   // Stamp (ns) of the most recent deskewing pose fed from tf, to avoid double-querying poses

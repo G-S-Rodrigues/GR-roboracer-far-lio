@@ -28,6 +28,7 @@ set(NODE_DEPENDENCIES
   tf2_geometry_msgs
   geometry_msgs
   sensor_msgs
+  laser_geometry
   nav_msgs
   pcl_conversions
   PCL
@@ -107,5 +108,11 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
   )
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  # launch_testing: the LaserScan input (FARLIO-1410..1440)
+  ament_add_pytest_test(test_scan_input test/test_scan_input.py TIMEOUT 180)
+endif()
 
 ament_package()

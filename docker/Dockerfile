@@ -52,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
       ros-${ROS_DISTRO}-geographic-msgs \
       ros-${ROS_DISTRO}-pcl-conversions \
+      ros-${ROS_DISTRO}-laser-geometry \
       build-essential \
       cmake \
       git \
@@ -137,6 +138,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-ros-base \
       ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
       ros-${ROS_DISTRO}-geographic-msgs \
+      ros-${ROS_DISTRO}-laser-geometry \
       libpcl-io1.14 \
     && rm -rf /var/lib/apt/lists/*
 

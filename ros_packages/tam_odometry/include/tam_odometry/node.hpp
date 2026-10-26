@@ -30,6 +30,7 @@ struct NodeConfig {
   std::string cloud_frame{};
   std::string input_pointcloud{};
   std::string input_pointcloud_status{};
+  std::string input_scan{};  // sensor_msgs/LaserScan topic; empty = use the PointCloud2 input
   std::string output_odom{};
   std::string input_map{};
   std::string update_map_srv{};
