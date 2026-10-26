@@ -87,7 +87,8 @@
         odom_frame: "far_lio_odom"  # far-lio.yml: local_cartesian; standalone frame, avoids the stack's odom -> base_link
         child_frame: "base_link"
         cloud_frame: "laser"  # the gym scan frame (static TF base_link -> laser from the sim)
-        wait_tf: true  # GICP_EXT waits for the EKF handshake; far-lio.yml: false
+        wait_tf: false  # far-lio.yml: false. With true tam_gicp_ext waits for the EKF TF handshake while ekf_2d_kin
+        # (initialize_from_measurements) waits for the first lidar odometry: a deadlock, 0 poses (FARLIO_1610)
         input_pointcloud: "/kitti/velo/pointcloud" # unused: node.input_scan below replaces it
         input_scan: "/scan"  # new key (step 6): the gym's 64-beam LaserScan
         input_pointcloud_status: ""
