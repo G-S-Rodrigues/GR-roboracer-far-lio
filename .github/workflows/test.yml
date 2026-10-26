@@ -8,7 +8,7 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'ci-scratch/**']
   pull_request:
 
 concurrency:
