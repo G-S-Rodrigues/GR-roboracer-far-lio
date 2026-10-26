@@ -57,7 +57,9 @@ LR = 0.17145          # base_link to rear axle
 LF = 0.33 - LR        # wheelbase 0.33 m
 VARIANT = os.environ.get('FARLIO_VARIANT', 'zero_accel')
 MIN_ERR_M = float(os.environ.get('FARLIO_MIN_ERR_M', '0'))
-MAX_STAMP_AGE_S = float(os.environ.get('FARLIO_MAX_STAMP_AGE_S', '1.0'))
+# Measured 2026-10-26 at load 2.2 (3 runs x 3 variants): stamp age at receipt 0.0102 - 0.0147 s
+# (average_delay_ms is 10); the bound is 2x the largest.
+MAX_STAMP_AGE_S = float(os.environ.get('FARLIO_MAX_STAMP_AGE_S', '0.03'))
 MAX_ERR_M = float(os.environ.get('FARLIO_MAX_ERR_M', '0.05'))
 
 
