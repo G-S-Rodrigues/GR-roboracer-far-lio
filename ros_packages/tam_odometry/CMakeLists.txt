@@ -113,6 +113,9 @@ if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   # launch_testing: the LaserScan input (FARLIO-1410..1440)
   ament_add_pytest_test(test_scan_input test/test_scan_input.py TIMEOUT 180)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  # FARLIO_1510: config/f1tenth.yml in both nodes of the pair
+  add_launch_test(test/test_f1tenth_config.py TARGET farlio_1510 TIMEOUT 120)
 endif()
 
 ament_package()
