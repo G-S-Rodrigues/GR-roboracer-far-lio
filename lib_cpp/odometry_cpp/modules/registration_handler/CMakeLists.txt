@@ -74,6 +74,7 @@ if(BUILD_ODOMETRY_EXAMPLES)
   set(EXAMPLES
     icp
     gicp
+    bench_planar
   )
   set(EXAMPLES_CUDA
     icp
