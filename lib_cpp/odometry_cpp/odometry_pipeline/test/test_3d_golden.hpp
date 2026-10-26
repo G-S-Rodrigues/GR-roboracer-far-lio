@@ -24,6 +24,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -246,6 +247,17 @@ void run_case(const std::string& name, const std::string& solver)
   constexpr bool kGuided = TConfig::MODEL == tam::core::state::types::ModelType::EXTERNALGUESS;
   const float max_t = kGuided ? 0.05f : 0.5f;
   const float max_r = (kGuided ? 0.5f : 3.0f) * static_cast<float>(M_PI) / 180.0f;
+  {
+    float worst_t = 0.0f, worst_r = 0.0f;
+    for (int k = 0; k < kNumFrames; ++k) {
+      const Sophus::SE3f e = truth(k).inverse() * poses[k];
+      worst_t = std::max(worst_t, e.translation().norm());
+      worst_r = std::max(worst_r, e.so3().log().norm());
+    }
+    std::printf("ERR3D %s max_t %.17g m max_r %.17g deg (bounds %.2f m, %.2f deg)\n", name.c_str(),
+      static_cast<double>(worst_t), static_cast<double>(worst_r) * 180.0 / M_PI, max_t,
+      static_cast<double>(max_r) * 180.0 / M_PI);
+  }
   for (int k = 0; k < kNumFrames; ++k) {
     const Sophus::SE3f err = truth(k).inverse() * poses[k];
     EXPECT_LT(err.translation().norm(), max_t) << name << " frame " << k;
