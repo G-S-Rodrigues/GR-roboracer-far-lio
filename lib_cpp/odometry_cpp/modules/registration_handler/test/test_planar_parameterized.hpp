@@ -70,7 +70,7 @@ Result register_scan(const std::string & solver, const int beams, const bool pla
   config.planar = planar;
   auto registration = Reg<TConfig>::from_config(config, debug);
   registration->init();
-  registration->init_frame_map(map->get_config());
+  if constexpr (types::FRAMEMAP<TConfig>) registration->init_frame_map(map->get_config());
 
   const auto pose2d = farlio_f1tenth::centerline_pose(s);
   const Sophus::SE3f truth(Eigen::Quaternionf(Eigen::AngleAxisf(static_cast<float>(pose2d.yaw), Eigen::Vector3f::UnitZ())),

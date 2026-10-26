@@ -117,6 +117,16 @@ public:
    * @param [in] config Configuration for the map
    * @note Debug signal of frame map are currently not used
    */
+  /// Store the planar (SE(2)) flag; set by the pipeline before init_frame_map
+  void set_planar(const bool planar) { this->config_.planar = planar; }
+
+  /// Config of the frame map (tests and diagnostics)
+  const types::MapConfig& get_frame_map_config() const
+    requires types::FRAMEMAP<TConfig>
+  {
+    return frame_map_->get_config();
+  }
+
   void init_frame_map(const types::MapConfig& config)
     requires types::FRAMEMAP<TConfig>
   {

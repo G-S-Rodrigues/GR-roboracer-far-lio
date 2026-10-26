@@ -220,6 +220,9 @@ public:
    * @brief Initialize threading
    * -> needs to be done after param override
    */
+  /// Store the planar flag (single-layer scans); set by the pipeline before init
+  void set_planar(const bool planar) { this->config_.planar = planar; }
+
   void init(const std::size_t num_threads = 1, [[maybe_unused]] const bool update_map = false)
   {
     // This global variable requires static duration storage to be able to manipulate the max
