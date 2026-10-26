@@ -46,6 +46,7 @@
 #include <variant>
 #include <vector>
 
+#include "map_handler/planar_covariance.hpp"
 #include "odometry_base/odometry_base.hpp"
 #include "odometry_types/point_types.hpp"
 #include "odometry_utils/utils.hpp"
@@ -342,7 +343,7 @@ protected:
     types::Neighbors<TConfig>* raw_neighbors = thrust::raw_pointer_cast(neighbors.data());
 
     cuda::utils::set_normal_covariance_kernel<<<grid_size, cuda::BLOCK_SIZE, 0, stream.get()>>>(
-      raw_neighbors, neighbors.size(), this->cov_regularization_type_, num_neighbors);
+      raw_neighbors, neighbors.size(), this->cov_regularization_type_, num_neighbors, this->config_.planar);
 
     stream.wait();
     nvtxRangePop();
@@ -365,8 +366,10 @@ protected:
     const Eigen::Vector3f mean = sum_pts / static_cast<float>(neighbor.num_neighbors);
     for (size_t i = 0; i < neighbor.num_neighbors; ++i)
       sum_pts_cov += (neighbor.neighbor[i]->pos - mean) * (neighbor.neighbor[i]->pos - mean).transpose();  // NOLINT
-    const Eigen::Matrix3f cov = sum_pts_cov / static_cast<float>(neighbor.num_neighbors);
+    Eigen::Matrix3f cov = sum_pts_cov / static_cast<float>(neighbor.num_neighbors);
     // clang-format on
+    // Single-layer (2D) scans: extrude the covariance vertically so the normal stays in the plane
+    if (this->config_.planar) utils::planarize_covariance(cov);
     // Compute the normal
     Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigensolver;
     eigensolver.computeDirect(cov);
