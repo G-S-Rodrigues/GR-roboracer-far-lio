@@ -7,6 +7,7 @@
 #
 # The committed golden_3d_cpu.txt stays the default for runs without FARLIO_GOLDEN_PATH.
 set -euo pipefail
+set +u  # ROS setup scripts read unset variables
 . /opt/ros/jazzy/setup.bash
 cd /dev_ws
 colcon --log-base out/log build --build-base out/build-cpu --install-base out/install-cpu \
@@ -18,6 +19,7 @@ colcon --log-base out/log build --build-base out/build-cpu --install-base out/in
 cd /ref_ws
 colcon --log-base log build --build-base build --install-base install --packages-select tam_odometry \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_CUDA=OFF -DBUILD_TESTING=ON
+set -u
 export FARLIO_GOLDEN_PATH=/dev_ws/out/golden_ref_same_job.txt
 FARLIO_RECORD_GOLDEN=1 build/tam_odometry/tam_odometry/odometry_pipeline/unit_3d_golden > /dev_ws/out/record.log 2>&1 || true
 test -s "$FARLIO_GOLDEN_PATH" || { echo "reference golden was not recorded"; tail -20 /dev_ws/out/record.log; exit 1; }
