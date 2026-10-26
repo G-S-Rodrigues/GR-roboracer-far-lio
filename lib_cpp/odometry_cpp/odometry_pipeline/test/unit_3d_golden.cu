@@ -20,10 +20,10 @@
 #include <cuda_runtime.h>
 
 #define FARLIO_GOLDEN_FILE FARLIO_GOLDEN_DIR "/golden_3d_cuda.txt"
-// Tolerance = 2 x the measured max per-component spread. Measured 2026-10-26 on unmodified-algorithm
-// ef20510: N = 6 recordings, NVIDIA GeForce RTX 4060 Laptop GPU (sm_89), CUDA 12.8.1, Release;
-// all six golden files byte-identical (md5 d83b6d88...), so spread = 0 and tolerance = 0.
-#define FARLIO_GOLDEN_TOL 0.0f
+// Measured 2026-10-26 on upstream ef20510: N = 7 recordings, bit-identical (md5 d83b6d88...) on an
+// NVIDIA GeForce RTX 4060 Laptop GPU (sm_89), CUDA 12.8.1, Release. The spread is exactly 0, so
+// 2 x spread is meaningless; the tolerance is 1e-6, the same as the 3D CPU guard.
+#define FARLIO_GOLDEN_TOL 1.0e-6f
 #include "test_3d_golden.hpp"
 
 using namespace tam::core::state::types;  // NOLINT

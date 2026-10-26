@@ -9,5 +9,5 @@ The golden is compared bit-exact. It is a reviewed diff: regenerate it only in a
 run pass. If an image move changes it, that is diagnosable from the digest above.
 
 `golden_3d_cuda.txt` (FARLIO-1040) was recorded the same way with the CUDA build (`-DBUILD_CUDA=ON -DCUDA_ARCHITECTURES=89`)
-on an NVIDIA GeForce RTX 4060 Laptop GPU. Six consecutive recordings were byte-identical, so the measured spread is 0
-and the tolerance (2 x spread) is 0. Another GPU may differ; re-measure there before widening anything.
+on an NVIDIA GeForce RTX 4060 Laptop GPU. Seven recordings were bit-identical, so the measured spread is 0
+and the tolerance is 1e-6 (owner ruling), as for the CPU guard. Another GPU may differ; re-measure there before widening anything.
