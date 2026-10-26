@@ -18,7 +18,8 @@
 //
 // FARLIO-1010..1040: the 3D odometry path, with every 2D feature off, is held to a golden recorded
 // on unmodified upstream ef20510. Run with FARLIO_RECORD_GOLDEN=1 to (re)record. A recorded golden
-// is a reviewed diff; never regenerate it to make a run pass.
+// is a reviewed diff; never regenerate it to make a run pass. FARLIO_GOLDEN_PATH (env) names the
+// golden file instead of the committed one.
 #pragma once
 
 #include <gtest/gtest.h>
@@ -246,7 +247,10 @@ void run_case(const std::string& name, const std::string& solver)
     }
   }
 
-  const std::string path = FARLIO_GOLDEN_FILE;
+  // FARLIO_GOLDEN_PATH overrides the committed golden: CI records the golden from upstream ef20510 in
+  // the same job (same machine, same flags) and compares the branch against that.
+  const char* path_env = std::getenv("FARLIO_GOLDEN_PATH");
+  const std::string path = (path_env != nullptr && path_env[0] != '\0') ? path_env : FARLIO_GOLDEN_FILE;
   if (recording) {
     record(path, lines);
     return;

@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
       - uses: docker/setup-buildx-action@v3
       - name: Build the deps image
         uses: docker/build-push-action@v6
@@ -37,17 +38,12 @@ jobs:
           tags: far-lio-deps:ci
           cache-from: type=gha,scope=deps
           cache-to: type=gha,scope=deps,mode=max
-      - name: CPU build and tests
+      - name: Prepare the reference tree (upstream ef20510 plus the golden tests)
+        run: scripts/ci_prepare_ref.sh "$RUNNER_TEMP/far-lio-ref"
+      - name: CPU build, same-job golden, tests
         run: |
-          docker run --rm -v "$PWD":/dev_ws/src/far_lio -w /dev_ws far-lio-deps:ci bash -lc '
-            set -e
-            . /opt/ros/jazzy/setup.bash
-            colcon --log-base out/log build --build-base out/build-cpu --install-base out/install-cpu \
-              --packages-up-to tam_odometry tam_state_estimation_node \
-              --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_CUDA=OFF -DBUILD_TESTING=ON
-            colcon --log-base out/log test --build-base out/build-cpu --install-base out/install-cpu \
-              --packages-select tam_odometry tam_state_estimation_node || true
-            colcon test-result --test-result-base out/build-cpu --verbose'
+          docker run --rm -v "$PWD":/dev_ws/src/far_lio -v "$RUNNER_TEMP/far-lio-ref":/ref_ws/src/far_lio \
+            -w /dev_ws far-lio-deps:ci bash -lc '/dev_ws/src/far_lio/scripts/ci_cpu.sh'
 
   cuda-compile:
     runs-on: ubuntu-latest
