@@ -23,6 +23,8 @@ FARLIO_RECORD_GOLDEN=1 build/tam_odometry/tam_odometry/odometry_pipeline/unit_3d
 test -s "$FARLIO_GOLDEN_PATH" || { echo "reference golden was not recorded"; tail -20 /dev_ws/out/record.log; exit 1; }
 
 cd /dev_ws
+# frame-1 values at %.17g, branch vs same-job golden, for comparing a local run with a CI run
+out/build-cpu/tam_odometry/tam_odometry/odometry_pipeline/unit_3d_golden 2>&1 | grep -a '^FRAME1' || true
 colcon --log-base out/log test --build-base out/build-cpu --install-base out/install-cpu \
   --packages-select tam_odometry tam_state_estimation_node || true
 colcon test-result --test-result-base out/build-cpu --verbose

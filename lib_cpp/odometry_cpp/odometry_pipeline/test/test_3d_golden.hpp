@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -173,6 +174,14 @@ inline void record(const std::string& path, const std::vector<std::string>& line
   for (const auto& l : lines) out << l << "\n";
 }
 
+// Frame-1 values at full double precision, so a local run and a CI run can be compared digit by digit
+inline void print_frame1(const char* which, const std::string& name, const float* v, int)
+{
+  std::printf("FRAME1 %s %s", which, name.c_str());
+  for (int i = 0; i < 7; ++i) std::printf(" %.17g", static_cast<double>(v[i]));
+  std::printf("\n");
+}
+
 template <typename TConfig>
 void run_case(const std::string& name, const std::string& solver)
 {
@@ -247,6 +256,13 @@ void run_case(const std::string& name, const std::string& solver)
     }
   }
 
+  {
+    const Sophus::SE3f& r = poses[1];
+    const float v[7] = {r.translation().x(), r.translation().y(), r.translation().z(), r.unit_quaternion().w(),
+      r.unit_quaternion().x(), r.unit_quaternion().y(), r.unit_quaternion().z()};
+    print_frame1("BRANCH", name, v, 0);
+  }
+
   // FARLIO_GOLDEN_PATH overrides the committed golden: CI records the golden from upstream ef20510 in
   // the same job (same machine, same flags) and compares the branch against that.
   const char* path_env = std::getenv("FARLIO_GOLDEN_PATH");
@@ -258,6 +274,7 @@ void run_case(const std::string& name, const std::string& solver)
   std::ifstream probe(path);
   ASSERT_TRUE(probe.good()) << "missing golden " << path << " (a missing golden is a failure, not a skip)";
   const auto golden = read_golden(path);
+  print_frame1("GOLDEN", name, golden.at({name, 1}).v, 0);
   for (int k = 0; k < kNumFrames; ++k) {
     const auto it = golden.find({name, k});
     ASSERT_NE(it, golden.end()) << "no golden for " << name << " frame " << k;
