@@ -66,6 +66,11 @@ if(BUILD_TESTING)
  ament_add_gtest(unit_test_runtime test/unit_test_runtime.cpp)
  target_link_libraries(unit_test_runtime ${PROJECT_NAME}) # make our library available to the test executable
 
+ # FARLIO_1620: pattern-fill uninitialised locals so an unwritten output field is a fixed non-zero value
+ ament_add_gtest(unit_test_ekf2d_output test/unit_test_ekf2d_output.cpp)
+ target_link_libraries(unit_test_ekf2d_output ${PROJECT_NAME})
+ target_compile_options(unit_test_ekf2d_output PRIVATE -ftrivial-auto-var-init=pattern)
+
  ament_add_gtest(unit_test_state_machine test/unit_test_state_machine.cpp)
  target_link_libraries(unit_test_state_machine ${PROJECT_NAME}) # make our library available to the test executable
 endif()
