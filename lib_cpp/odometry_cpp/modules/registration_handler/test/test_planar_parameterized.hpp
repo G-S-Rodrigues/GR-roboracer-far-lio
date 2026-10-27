@@ -42,7 +42,7 @@ constexpr double kVoxel = 0.5;  // step 1b's pick (unit_planar_density.cpp)
 /// from the truth. `planar` switches both the map covariance and the solver.
 template <typename TConfig, template <typename> class Reg>
 Result register_scan(const std::string & solver, const int beams, const bool planar, const Sophus::SE3f & offset,
-  const double s = 3.0)
+  const double s = 3.0, const double z_sigma = 0.0)
 {
   types::MapConfig map_config;
   types::MapDebug map_debug;
@@ -52,10 +52,12 @@ Result register_scan(const std::string & solver, const int beams, const bool pla
   map_config.planar = planar;
   auto map = tam::core::state::VoxelHashMap<TConfig>::from_config(map_config, map_debug);
   map->init();
+  farlio_f1tenth::Noise z_map_noise(777);
   std::vector<types::Point<types::Point_XYZ>> wall;
   for (const auto & p : farlio_f1tenth::wall_points()) {
     types::Point<types::Point_XYZ> pt;
     pt.pos = p;
+    pt.pos.z() = static_cast<float>(z_sigma * z_map_noise.gaussian());
     wall.push_back(pt);
   }
   map->add_points(wall);
@@ -76,10 +78,12 @@ Result register_scan(const std::string & solver, const int beams, const bool pla
   const Sophus::SE3f truth(Eigen::Quaternionf(Eigen::AngleAxisf(static_cast<float>(pose2d.yaw), Eigen::Vector3f::UnitZ())),
     Eigen::Vector3f(static_cast<float>(pose2d.x), static_cast<float>(pose2d.y), 0.0f));
   farlio_f1tenth::Noise noise(20261025);
+  farlio_f1tenth::Noise z_frame_noise(778);
   std::vector<types::Point<TConfig>> frame;
   for (const auto & h : farlio_f1tenth::cast_scan(pose2d, beams, &noise)) {
     types::Point<TConfig> pt{};
     pt.pos = h;
+    pt.pos.z() = static_cast<float>(z_sigma * z_frame_noise.gaussian());
     frame.push_back(pt);
   }
   const Sophus::SE3f guess = truth * offset;
@@ -151,12 +155,17 @@ void run_1220_1230()
   }
 }
 
-/// FARLIO-1240: planar off on the same 2D data: z / roll / pitch drift is non-zero (why the flag exists).
+/// FARLIO-1240: planar off: z / roll / pitch drift is non-zero (why the flag exists).
+/// The scene has 1 cm of height noise on the map walls and on the scan hits (seeded). A noise-free
+/// coplanar scene gives exactly 0 drift (measured, GICP and ICP): every normal lies in the plane, so the
+/// z / roll / pitch rows of the update vanish, and the premise only holds for a scene with height
+/// structure, which a real wall is. Measured drift at sigma 0.005 / 0.01 / 0.03 m: GICP 4.8e-4 / 1.1e-3 /
+/// 7.4e-3, ICP 8.8e-4 / 2.1e-3 / 5.7e-3; at sigma 0 it is 0.
 template <typename TConfig, template <typename> class Reg>
 void run_1240()
 {
   const auto r = farlio_planar_solve::register_scan<TConfig, Reg>(
-    "GaussNewton", 1080, false, farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f));
+    "GaussNewton", 1080, false, farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f), 3.0, 0.01);
   const float drift = std::abs(r.pose.translation().z()) + std::abs(r.pose.unit_quaternion().x()) +
                       std::abs(r.pose.unit_quaternion().y());
   std::printf("FARLIO_1240 planar off drift %.3e\n", drift);
