@@ -116,6 +116,8 @@ if(BUILD_TESTING)
   find_package(launch_testing_ament_cmake REQUIRED)
   # FARLIO_1510: config/f1tenth.yml in both nodes of the pair
   add_launch_test(test/test_f1tenth_config.py TARGET farlio_1510 TIMEOUT 120)
+  # FARLIO_1610: one synthetic lap through the 2D node pair
+  add_launch_test(test/test_f1tenth_synthetic_lap.py TARGET farlio_1610 TIMEOUT 240)
 endif()
 
 ament_package()
