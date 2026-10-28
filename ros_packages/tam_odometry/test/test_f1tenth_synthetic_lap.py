@@ -30,12 +30,23 @@ yaw error) and fails only if the drift grows past twice the worst measured over 
     position: 8.859 8.883 8.926 8.927 8.929 m  -> worst 8.929 m  -> MAX_POS_ERR_M = 17.9
     yaw:      0.272 0.274 0.281 0.285 0.299 deg -> worst 0.299 deg -> MAX_YAW_ERR_DEG = 0.60
 
-(64 beams, GICP, ekf_2d_kin as committed, 2026-10-28, load 1-1.5.) The pair does not track the lap: it loses the
+(Case kin64: 64 beams, GICP, ekf_2d_kin, 2026-10-28, load 1-1.5.) The pair does not track the lap: it loses the
 position along the straights, where parallel walls leave the along-track position unobservable from one scan
 (repo gotcha #18), and the IMU-only filter then integrates. The matrix of what was tried (1080 beams 4.1 m,
 ekf_2d_nh 3.7 m, a larger lidar-velocity R, ICP_CV 13.8 m) is in the part 4 hand-off. The real accuracy claim is
 part 5: FAR-LIO localizing on its own map, with the lap error measured against ground truth there. Do not read
 this bound as an accuracy.
+
+The other three cases are measured the same way (3 runs each, 2026-10-28, load 1.7-4.5), each bound 2x its worst:
+
+    case     position m (3 runs)        yaw deg (3 runs)         bounds
+    kin1080  4.1108 4.1062 4.1034      0.200 0.196 0.199        8.23 m / 0.40 deg
+    nh64     3.8506 3.7190 3.7874      1.067 1.044 1.089        7.71 m / 2.18 deg
+    nh1080   1.5141 1.4934 1.4971      0.388 0.390 0.388        3.03 m / 0.78 deg
+
+kin = ekf_2d_kin (IMU only), nh = ekf_2d_nh (vehicle model + per-wheel speeds from the rigid-body kinematics);
+the case is chosen by FARLIO_LAP_CASE, set in CMakeLists.txt. The plan's 0.10 m / 2 deg is met by none of them.
+Bite check: FARLIO_LAP_NOISE_X=2 doubles the scan noise; the record is in the part 4 hand-off.
 
 Asserts: /core/state/odometry keeps >= 0.9 x the scan rate, the drift bounds above, and z, roll and pitch exactly 0.
 """
@@ -45,7 +56,7 @@ import tempfile
 import time
 import unittest
 
-from diagnostic_msgs.msg import DiagnosticArray  # noqa: F401  (the odometry node publishes its own status)
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from launch import LaunchDescription
 from launch_ros.actions import Node
 import launch_testing
@@ -57,14 +68,29 @@ import rclpy
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Imu, LaserScan
+from tum_msgs.msg import TUMFloat64PerWheelStamped
 
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'config', 'f1tenth.yml')
 LASER_X, LASER_Z = 0.10355, 0.031   # base_link -> laser (URDF, plan table)
 STRAIGHT, RADIUS, HALF_WIDTH = 8.0, 3.0, 1.1
-NUM_BEAMS, FOV, RANGE_MIN, RANGE_MAX, SIGMA = 64, 4.7, 0.06, 10.0, 0.03
+# The case: filter (kin = IMU only; nh = vehicle model + per-wheel speeds) x beam count, set by the CMake entry.
+CASE = os.environ.get('FARLIO_LAP_CASE', 'kin64')
+EKF_EXEC = 'tam_state_estimation_node_ekf_' + ('2d_nh' if CASE.startswith('nh') else '2d_kin')
+NUM_BEAMS = int(CASE.lstrip('kinh'))
+FOV, RANGE_MIN, RANGE_MAX = 4.7, 0.06, 10.0
+# FARLIO_LAP_NOISE_X scales the 3 cm scan noise: the bite check of each case's bound (see the docstring)
+SIGMA = 0.03 * float(os.environ.get('FARLIO_LAP_NOISE_X', '1'))
+WHEEL_R, HALF_TRACK, LR, LF = 0.058, 0.118, 0.17145, 0.33 - 0.17145   # wheel radius, half track, CoG to axles
 RATE, SPEED, STAND_S, RAMP_S = 100.0, 2.0, 3.0, 2.0
 PACE = float(os.environ.get('FARLIO_LAP_PACE', '1.0'))   # wall seconds per sim second
-MAX_POS_ERR_M, MAX_YAW_ERR_DEG = 17.9, 0.60   # 2x the worst of 5 runs, see the docstring
+# case -> (max worst position error m, max worst yaw error deg): 2x the worst measured, see the docstring
+BOUNDS = {
+    'kin64': (17.9, 0.60),
+    'kin1080': (8.23, 0.40),
+    'nh64': (7.71, 2.18),
+    'nh1080': (3.03, 0.78),
+}
+MAX_POS_ERR_M, MAX_YAW_ERR_DEG = BOUNDS[CASE]
 GRAVITY = 9.81
 SEED = 20261026
 MAP_PCD = os.path.join(tempfile.mkdtemp(prefix='farlio_1610_'), 'map.pcd')
@@ -149,10 +175,17 @@ def generate_test_description():
                     name='LidarOdometry', output='screen',
                     parameters=[CONFIG, {'use_sim_time': True, 'pipeline.update_map': False,
                                          'node.input_map': MAP_PCD}])
-    ekf = Node(package='tam_state_estimation_node', executable='tam_state_estimation_node_ekf_2d_kin',
+    ekf = Node(package='tam_state_estimation_node', executable=EKF_EXEC,
                namespace='/core/state', name='StateEstimation', output='screen',
                parameters=[CONFIG, {'use_sim_time': True}])
     return LaunchDescription([tf, odometry, ekf, launch_testing.actions.ReadyToTest()])
+
+
+def _wheel(px, py, v, omega):
+    """Wheel speed (rad/s) of the wheel at (px, py) from the CoG: the rigid-body speed of that point."""
+    if abs(omega) < 1e-9:
+        return v / WHEEL_R
+    return omega * math.hypot(px, py - v / omega) / WHEEL_R
 
 
 def _yaw(q):
@@ -175,6 +208,8 @@ class TestSyntheticLap(unittest.TestCase):
         be = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=1)
         pub_clock = self.node.create_publisher(Clock, '/clock', QoSProfile(depth=10))
         pub_scan = self.node.create_publisher(LaserScan, '/scan', be)
+        pub_wheel = self.node.create_publisher(TUMFloat64PerWheelStamped, '/vehicle/sensor/wheelspeed_radps', be)
+        pub_wst = self.node.create_publisher(DiagnosticArray, '/vehicle/sensor/wheelspeed_status', be)
         pub_imu = self.node.create_publisher(Imu, '/imu', be)
         got = []
         self.node.create_subscription(Odometry, '/core/state/odometry', got.append, be)
@@ -219,6 +254,18 @@ class TestSyntheticLap(unittest.TestCase):
             imu.linear_acceleration.y = vv * omega
             imu.linear_acceleration.z = GRAVITY
             pub_imu.publish(imu)
+            if CASE.startswith('nh'):
+                w = TUMFloat64PerWheelStamped()
+                w.stamp = clock.clock
+                w.data.front_left = _wheel(LF, HALF_TRACK, vv, omega)
+                w.data.front_right = _wheel(LF, -HALF_TRACK, vv, omega)
+                w.data.rear_left = _wheel(-LR, HALF_TRACK, vv, omega)
+                w.data.rear_right = _wheel(-LR, -HALF_TRACK, vv, omega)
+                pub_wheel.publish(w)
+                st = DiagnosticArray()
+                st.header.stamp = clock.clock
+                st.status.append(DiagnosticStatus(level=DiagnosticStatus.OK, name='wheel'))
+                pub_wst.publish(st)
             scan = LaserScan()
             scan.header.stamp = clock.clock
             scan.header.frame_id = 'laser'
