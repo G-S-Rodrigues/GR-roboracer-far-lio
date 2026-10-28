@@ -68,6 +68,6 @@ INSTANTIATE_TEST_SUITE_P(GICPCombinations, GICPParameterizedTest,
   [](const ::testing::TestParamInfo<TestParams>& info) { return info.param.string(); });
 
 #include "test_planar_parameterized.hpp"
-TEST(FARLIO_1210, GICP_PlanarSolve) { run_1210<tam::core::state::types::GICP_EXT, tam::core::state::GICP>(); }
+TEST(FARLIO_1210, GICP_PlanarSolve) { run_1210<tam::core::state::types::GICP_EXT, tam::core::state::GICP>(kGicp1210); }
 TEST(FARLIO_1220, GICP_PlanarKeepsZRollPitch) { run_1220_1230<tam::core::state::types::GICP_EXT, tam::core::state::GICP>(); }
 TEST(FARLIO_1240, GICP_NonPlanarDrifts) { run_1240<tam::core::state::types::GICP_EXT, tam::core::state::GICP>(); }

@@ -66,6 +66,6 @@ INSTANTIATE_TEST_SUITE_P(ICPCombinations, ICPParameterizedTest,
   [](const ::testing::TestParamInfo<TestParams>& info) { return info.param.string(); });
 
 #include "test_planar_parameterized.hpp"
-TEST(FARLIO_1210, ICP_PlanarSolve) { run_1210<tam::core::state::types::ICP_EXT, tam::core::state::ICP>(); }
+TEST(FARLIO_1210, ICP_PlanarSolve) { run_1210<tam::core::state::types::ICP_EXT, tam::core::state::ICP>(kIcp1210); }
 TEST(FARLIO_1220, ICP_PlanarKeepsZRollPitch) { run_1220_1230<tam::core::state::types::ICP_EXT, tam::core::state::ICP>(); }
 TEST(FARLIO_1240, ICP_NonPlanarDrifts) { run_1240<tam::core::state::types::ICP_EXT, tam::core::state::ICP>(); }
