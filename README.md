@@ -97,6 +97,16 @@ bit-exact golden tests FARLIO-1010..1030). With it on:
   source. It runs `tam_gicp_ext` with `ekf_2d_kin` (IMU only; the vehicle-model values are recorded for
   `ekf_2d_nh`).
 
+**What the tests measure (and do not claim).** A single scan cannot observe its position along a straight
+between parallel walls, so FARLIO-1210 (one registration from a 0.10 m / -0.08 m / 2 deg offset) asserts only
+lateral error and heading on straights and records the along-track error (0.09-0.13 m at 64 beams, i.e. the
+offset left uncorrected). It asserts 1 cm / 0.2 deg where that is met (GICP at 1080 beams on straights, and one
+curve position); elsewhere each case has a bound of twice its measured worst (GICP on curves 0.05-0.18 m,
+ICP on curves 0.16-0.20 m). FARLIO-1610 (one synthetic lap at 2 m/s, 2 s ramp, ekf_2d_kin or ekf_2d_nh, 64
+or 1080 beams) records drift of 1.5-8.9 m worst position and 0.2-1.1 deg yaw, against bounds of twice that; it
+does not meet 0.10 m / 2 deg in any case. Neither test is an accuracy claim: localization on a map built by
+FAR-LIO itself is measured in the GR-roboracer stack.
+
 **64-beam density caveat.** Fraction of frame points that get a covariance (FARLIO-1100, synthetic stadium
 track, mean over 12 poses): 64 beams 0.000 at 0.25 m voxels, 0.605 at 0.5 m, 0.697 at 1.0 m; 1080 beams 0.921,
 0.944, 0.950. `config/f1tenth.yml` uses 0.5 m. A 64-beam scan is sparse: point-to-point ICP (`tam_icp_ext`)
