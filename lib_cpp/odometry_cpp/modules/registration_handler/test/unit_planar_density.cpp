@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Maximilian Leitenstern, Marcel Weinmann
+ * Copyright 2026 Guilherme Rodrigues
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
