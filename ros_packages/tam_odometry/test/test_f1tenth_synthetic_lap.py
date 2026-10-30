@@ -25,12 +25,16 @@ earlier profile jumped 0 -> 2 m/s in one tick, which no vehicle does; this is a 
 FAR-LIO setting. Measured with the 2 s ramp the lap drifts less (worst 8.9 m, against 28.1 m for the step).
 
 THIS TEST DOES NOT CLAIM THE PLAN'S 10 cm / 2 deg. It records the drift of this pair on this lap (worst position and
-yaw error) and fails only if the drift grows past twice the worst measured over 5 runs of this exact test:
+yaw error) and fails only if the drift grows past twice the worst measured over the runs of this exact test. Case kin64 (64 beams,
+GICP, ekf_2d_kin), position 17.9 m = 2 x the worst 8.929 m of the first 5 runs (2026-10-28, load 1-1.5):
 
     position: 8.859 8.883 8.926 8.927 8.929 m  -> worst 8.929 m  -> MAX_POS_ERR_M = 17.9
-    yaw:      0.272 0.274 0.281 0.285 0.299 deg -> worst 0.299 deg -> MAX_YAW_ERR_DEG = 0.60
 
-(Case kin64: 64 beams, GICP, ekf_2d_kin, 2026-10-28, load 1-1.5.) The pair does not track the lap: it loses the
+Yaw is bimodal. The first 5 runs read 0.272 0.274 0.281 0.285 0.299 deg; the scripts/ci_cpu.sh run read 0.683 deg
+(over the 0.60 deg first set from those 5); the 10-run re-measure (2026-10-30, load 2.4-6.0) read 0.314 0.274 0.303
+0.665 0.303 0.664 0.310 0.304 0.281 0.300 deg. Two modes: ~0.30 deg (all of the first 5 and 8 of the 11 later runs)
+and ~0.665 deg (0.665, 0.664 and 0.683, 3 of the 11 later runs). Worst of the 16 readings: 0.683 deg, so MAX_YAW_ERR_DEG = 1.37 (2 x 0.683,
+owner ruling 2026-10-30). The position of the 10-run re-measure was 8.899-8.983 m, inside 17.9. The pair does not track the lap: it loses the
 position along the straights, where parallel walls leave the along-track position unobservable from one scan
 (repo gotcha #18), and the IMU-only filter then integrates. The matrix of what was tried (1080 beams 4.1 m,
 ekf_2d_nh 3.7 m, a larger lidar-velocity R, ICP_CV 13.8 m) is in the part 4 hand-off. The real accuracy claim is
@@ -99,7 +103,7 @@ RATE, SPEED, STAND_S, RAMP_S = 100.0, 2.0, 3.0, 2.0
 PACE = float(os.environ.get('FARLIO_LAP_PACE', '1.0'))   # wall seconds per sim second
 # case -> (max worst position error m, max worst yaw error deg): 2x the worst measured, see the docstring
 BOUNDS = {
-    'kin64': (17.9, 0.60),
+    'kin64': (17.9, 1.37),   # yaw: 2 x 0.683 deg, the worst of 11 runs (bimodal ~0.30 / ~0.665); owner ruling
     'kin1080': (18.1, 1.21),   # position: 2 x 9.035 m, see the kin1080 note in the docstring; yaw unchanged
     'nh64': (7.71, 2.18),
     'nh1080': (3.03, 0.78),
