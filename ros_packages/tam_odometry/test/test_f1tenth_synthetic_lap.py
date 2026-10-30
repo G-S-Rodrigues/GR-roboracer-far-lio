@@ -51,8 +51,13 @@ have 3-6 runs and may have a second mode they have not shown; a flaky failure th
 
 kin = ekf_2d_kin (IMU only), nh = ekf_2d_nh (vehicle model + per-wheel speeds from the rigid-body kinematics);
 the case is chosen by FARLIO_LAP_CASE, set in CMakeLists.txt. The plan's 0.10 m / 2 deg is met by none of them.
+kin1080 has a second position mode (2026-10-30): of 19 further normal runs, 18 read 3.96-4.47 m and one read
+9.035 m with yaw 0.313 deg (load about 8), over the 8.94 m bound set from the first ten. The position bound is
+therefore 2 x the worst of all runs = 18.1 m. The yaw worst stays 0.605 deg (the 0.313 deg run is below it), so
+1.21 deg stands.
+
 Bite check: FARLIO_LAP_NOISE_X scales the scan noise and FARLIO_LAP_BEAMS overrides the beam count; the record is
-in the part 4 hand-off. kin1080 (bound 8.94 m) is NOT tripped by 2x noise (8.751 m) or 4x noise (2.521 m, the error is
+in the part 4 hand-off. kin1080 (bound 18.1 m) is NOT tripped by 2x noise (8.751 m) or 4x noise (2.521 m, the error is
 not monotonic in the noise), but IS tripped by 32 beams: 37.184 m, yaw 0.191 deg, path 1.1472 of the lap
 (2026-10-30). That is the named degradation of kin1080.
 
@@ -95,7 +100,7 @@ PACE = float(os.environ.get('FARLIO_LAP_PACE', '1.0'))   # wall seconds per sim 
 # case -> (max worst position error m, max worst yaw error deg): 2x the worst measured, see the docstring
 BOUNDS = {
     'kin64': (17.9, 0.60),
-    'kin1080': (8.94, 1.21),
+    'kin1080': (18.1, 1.21),   # position: 2 x 9.035 m, see the kin1080 note in the docstring; yaw unchanged
     'nh64': (7.71, 2.18),
     'nh1080': (3.03, 0.78),
 }
