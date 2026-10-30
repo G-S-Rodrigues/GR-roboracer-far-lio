@@ -52,4 +52,8 @@ echo "branch:"
 out/build-cpu/tam_odometry/tam_odometry/odometry_pipeline/unit_3d_golden 2>&1 | grep -a '^FRAME1\|^ERR3D' || true
 colcon --log-base out/log test --build-base out/build-cpu --install-base out/install-cpu \
   --packages-select tam_odometry tam_state_estimation_node || true
+# FARLIO_1620 (ctest name unit_test_ekf2d_output). tam_state_estimation is not selected whole: its upstream
+# cpplint fails on code this branch did not write. Only this test is run from it.
+colcon --log-base out/log test --build-base out/build-cpu --install-base out/install-cpu \
+  --packages-select tam_state_estimation --ctest-args -R unit_test_ekf2d_output || true
 colcon test-result --test-result-base out/build-cpu --verbose
