@@ -70,3 +70,44 @@ INSTANTIATE_TEST_SUITE_P(CUDAGICPCombinations, GICPParameterizedTest,
     TestParams{"MIN_EIGENVALUE", "GaussNewton"}, TestParams{"MIN_EIGENVALUE", "LevenbergMarquardt"},
     TestParams{"FROBENIUS", "GaussNewton"}, TestParams{"FROBENIUS", "LevenbergMarquardt"}),
   [](const ::testing::TestParamInfo<TestParams>& info) { return info.param.string(); });
+
+#include "test_planar_parameterized.hpp"
+// One case per process under ctest (gtest_discover_tests runs each TEST_P instance separately). On this GPU
+// (RTX 4060, 8 GiB) every cuda::GICP case in a process keeps about 1.35 GiB after its map and matcher are
+// destroyed (measured: used memory 2450 / 3804 / 5158 / 6512 / 7866 MiB after cases 1..5, unchanged by
+// cudaDeviceSynchronize and cudaMemPoolTrimTo; cuda::ICP does not do this), so six cases in one process end in
+// cudaErrorMemoryAllocation. One instance per (row, solver) keeps each process at one case.
+class Farlio1210GicpCuda : public ::testing::TestWithParam<int>
+{
+};
+TEST_P(Farlio1210GicpCuda, PlanarSolve)
+{
+  CHECK_CUDA_ERROR();
+  const int i = GetParam();
+  check_1210_row<tam::core::state::types::CUDA_GICP_EXT, tam::core::state::cuda::GICP>(
+    kGicp1210Cuda[i / 2], i % 2 == 0 ? "GaussNewton" : "LevenbergMarquardt");
+}
+INSTANTIATE_TEST_SUITE_P(FARLIO_1210_CUDA_GICP, Farlio1210GicpCuda, ::testing::Range(0, 20),
+  [](const ::testing::TestParamInfo<int>& info) {
+    const auto& b = kGicp1210Cuda[info.param / 2];
+    return "s" + std::to_string(static_cast<int>(b.s)) + "_" + std::to_string(b.beams) +
+           (info.param % 2 == 0 ? "_GN" : "_LM");
+  });
+
+class Farlio1220GicpCuda : public ::testing::TestWithParam<int>
+{
+};
+TEST_P(Farlio1220GicpCuda, PlanarKeepsZRollPitch)
+{
+  CHECK_CUDA_ERROR();
+  const int i = GetParam();
+  check_1220_1230<tam::core::state::types::CUDA_GICP_EXT, tam::core::state::cuda::GICP>(
+    i / 2 == 0 ? "GaussNewton" : "LevenbergMarquardt", i % 2 == 0 ? 0.0f : 1.0f);
+}
+INSTANTIATE_TEST_SUITE_P(FARLIO_1220_CUDA_GICP, Farlio1220GicpCuda, ::testing::Range(0, 4));
+
+TEST(FARLIO_1240, CUDA_GICP_NonPlanarDrifts)
+{
+  CHECK_CUDA_ERROR();
+  run_1240<tam::core::state::types::CUDA_GICP_EXT, tam::core::state::cuda::GICP>();
+}

@@ -16,7 +16,9 @@
 #pragma once
 // FARLIO-1200..1240: the planar (SE(2)) solve on the synthetic F1TENTH track. Included by
 // unit_gicp.cpp and unit_icp.cpp. (FARLIO-1250 is the step-1c golden staying bit-exact.)
-// Host (CPU) only: the CUDA twins are not written yet.
+// Compiled twice: as host code (unit_gicp.cpp, unit_icp.cpp) and as device code (unit_gicp.cu, unit_icp.cu), where
+// the map and the matcher are the cuda:: ones and the frame is a thrust::device_vector. The fixture, the offsets
+// and the asserts are the same text; the bound tables are per backend (kGicp1210 / kGicp1210Cuda, ...).
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -24,7 +26,6 @@
 #include <string>
 #include <vector>
 
-#ifndef __CUDACC__
 #include "f1tenth_track.hpp"
 #include "test_utils.hpp"
 
@@ -36,6 +37,18 @@ struct Result {
   Sophus::SE3f pose;
   Sophus::SE3f truth;
 };
+
+#ifdef __CUDACC__
+template <typename TConfig>
+using PlanarMap = tam::core::state::cuda::VoxelHashMap<TConfig>;
+template <typename TConfig>
+using Frame = thrust::device_vector<types::Point<TConfig>>;
+#else
+template <typename TConfig>
+using PlanarMap = tam::core::state::VoxelHashMap<TConfig>;
+template <typename TConfig>
+using Frame = std::vector<types::Point<TConfig>>;
+#endif
 
 constexpr double kVoxel = 0.5;  // step 1b's pick (unit_planar_density.cpp)
 
@@ -51,7 +64,7 @@ Result register_scan(const std::string & solver, const int beams, const bool pla
   map_config.max_distance = 100.0;
   map_config.cov_regularization = "FROBENIUS";
   map_config.planar = planar;
-  auto map = tam::core::state::VoxelHashMap<TConfig>::from_config(map_config, map_debug);
+  auto map = PlanarMap<TConfig>::from_config(map_config, map_debug);
   map->init();
   farlio_f1tenth::Noise z_map_noise(777);
   std::vector<types::Point<types::Point_XYZ>> wall;
@@ -80,13 +93,14 @@ Result register_scan(const std::string & solver, const int beams, const bool pla
     Eigen::Vector3f(static_cast<float>(pose2d.x), static_cast<float>(pose2d.y), 0.0f));
   farlio_f1tenth::Noise noise(20261025);
   farlio_f1tenth::Noise z_frame_noise(778);
-  std::vector<types::Point<TConfig>> frame;
+  std::vector<types::Point<TConfig>> frame_h;
   for (const auto & h : farlio_f1tenth::cast_scan(pose2d, beams, &noise)) {
     types::Point<TConfig> pt{};
     pt.pos = h;
     pt.pos.z() = static_cast<float>(z_sigma * z_frame_noise.gaussian());
-    frame.push_back(pt);
+    frame_h.push_back(pt);
   }
+  const Frame<TConfig> frame(frame_h.begin(), frame_h.end());
   const Sophus::SE3f guess = truth * offset;
   const Sophus::SE3f start = planar ? tam::core::state::utils::project_se2(guess) : guess;
   return {registration->register_frame(frame, map.get(), start, 1.0f, 0.1f), truth};
@@ -105,6 +119,7 @@ inline float rot_err_deg(const Sophus::SE3f & a, const Sophus::SE3f & b)
 }
 }  // namespace farlio_planar_solve
 
+#ifndef __CUDACC__  // a host utility: once is enough
 /// FARLIO-1200: project_se2 keeps yaw, x, y and z and zeroes roll and pitch.
 TEST(FARLIO_1200, ProjectSe2)
 {
@@ -119,6 +134,8 @@ TEST(FARLIO_1200, ProjectSe2)
   const Eigen::Vector3f fwd = p.unit_quaternion() * Eigen::Vector3f::UnitX();
   EXPECT_NEAR(2.0f * std::atan2(r.unit_quaternion().z(), r.unit_quaternion().w()), std::atan2(fwd.y(), fwd.x()), 1e-5f);
 }
+
+#endif  // __CUDACC__
 
 /// FARLIO-1210: from a (0.10 m, -0.08 m, 2 deg) offset, planar on, GaussNewton and LevenbergMarquardt (they
 /// give identical results, so one bound covers both), 1080 and 64 beams, at positions on the track.
@@ -171,53 +188,95 @@ constexpr Bound1210 kIcp1210[] = {
   {30.0, 64, 0.204f, 3.552f},  // measured 0.1017 m 1.776 deg
 };
 
+#ifdef __CUDACC__
+// The same ten positions on the GPU (RTX 4060, sm_89, measured 2026-10-30), bounds by the same rule as above from
+// the worst of 10 runs (5 repeats x 2 solvers) of this machine. cuda::GICP is repeatable to the last digit shown;
+// cuda::ICP is not (atomics order: s=20 64 beams spans 0.0010 to 0.0083 m and 0.132 to 0.787 deg over 10 runs), so
+// its bounds are on the worst of the spread and a row near its limit may need a re-measurement.
+constexpr Bound1210 kGicp1210Cuda[] = {
+  {3.0, 1080, 0.010f, 0.200f},  // measured 0.0019 m 0.174 deg (worst of 10)
+  {3.0, 64, 0.010f, 0.684f},  // measured 0.0052 m 0.342 deg (worst of 10)
+  {20.0, 1080, 0.010f, 0.434f},  // measured 0.0038 m 0.217 deg (worst of 10)
+  {20.0, 64, 0.022f, 1.318f},  // measured 0.0106 m 0.659 deg (worst of 10)
+  {10.0, 1080, 0.075f, 1.730f},  // measured 0.0374 m 0.865 deg (worst of 10)
+  {10.0, 64, 0.113f, 2.010f},  // measured 0.0563 m 1.005 deg (worst of 10)
+  {14.0, 1080, 0.010f, 0.200f},  // measured 0.0090 m 0.013 deg (worst of 10)
+  {14.0, 64, 0.140f, 1.924f},  // measured 0.0699 m 0.962 deg (worst of 10)
+  {30.0, 1080, 0.046f, 0.934f},  // measured 0.0227 m 0.467 deg (worst of 10)
+  {30.0, 64, 0.181f, 3.134f},  // measured 0.0903 m 1.567 deg (worst of 10)
+};
+constexpr Bound1210 kIcp1210Cuda[] = {
+  {3.0, 1080, 0.010f, 1.108f},  // measured 0.0035 m 0.554 deg (worst of 10)
+  {3.0, 64, 0.010f, 1.180f},  // measured 0.0065 m 0.590 deg (worst of 10)
+  {20.0, 1080, 0.010f, 1.050f},  // measured 0.0037 m 0.525 deg (worst of 10)
+  {20.0, 64, 0.010f, 1.574f},  // measured 0.0083 m 0.787 deg (worst of 10)
+  {10.0, 1080, 0.163f, 2.872f},  // measured 0.0811 m 1.436 deg (worst of 10)
+  {10.0, 64, 0.178f, 2.770f},  // measured 0.0889 m 1.385 deg (worst of 10)
+  {14.0, 1080, 0.173f, 2.026f},  // measured 0.0862 m 1.013 deg (worst of 10)
+  {14.0, 64, 0.170f, 2.056f},  // measured 0.0846 m 1.028 deg (worst of 10)
+  {30.0, 1080, 0.173f, 2.826f},  // measured 0.0862 m 1.413 deg (worst of 10)
+  {30.0, 64, 0.209f, 3.582f},  // measured 0.1041 m 1.791 deg (worst of 10)
+};
+#endif  // __CUDACC__
+
+/// One FARLIO-1210 row: one bound, one solver.
+template <typename TConfig, template <typename> class Reg>
+void check_1210_row(const Bound1210 & bound, const std::string & solver)
+{
+  const auto r = farlio_planar_solve::register_scan<TConfig, Reg>(
+    solver, bound.beams, true, farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f), bound.s);
+  // Error in the truth's body frame: x along the track, y across it.
+  const Eigen::Vector3f e = r.truth.so3().inverse() * (r.pose.translation() - r.truth.translation());
+  const bool straight = is_straight(bound.s);
+  const float pos = straight ? std::abs(e.y()) : std::hypot(e.x(), e.y());
+  const float rerr = farlio_planar_solve::rot_err_deg(r.pose, r.truth);
+  std::printf("FARLIO_1210 s %.0f %s %s %d beams: along %.4f lateral %.4f m, asserted %.4f m (<= %.3f), %.3f deg (<= %.3f)\n",
+    bound.s, straight ? "straight" : "curve", solver.c_str(), bound.beams, e.x(), e.y(), pos, bound.pos_m, rerr,
+    bound.rot_deg);
+  EXPECT_LE(pos, bound.pos_m) << "s " << bound.s << " " << solver << " " << bound.beams;
+  EXPECT_LE(rerr, bound.rot_deg) << "s " << bound.s << " " << solver << " " << bound.beams;
+  // Beats its start (review B1). Several bounds above exceed the start offset, so a matcher that returns its
+  // guess would pass them. The start error is the same metric of the start offset: the lateral part on a
+  // straight, the total on a curve, and the rotation of the offset. Every measured row is below it (worst
+  // ICP s=30 64 beams: 0.1017 m vs 0.128 m, 1.776 deg vs 2.000 deg).
+  const Sophus::SE3f start_offset = farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f);
+  const float start_pos = straight ? std::abs(start_offset.translation().y())
+                                   : std::hypot(start_offset.translation().x(), start_offset.translation().y());
+  const float start_rot = farlio_planar_solve::rot_err_deg(start_offset, Sophus::SE3f());
+  EXPECT_LT(pos, start_pos - 1.0e-3f) << "no better than its start, s " << bound.s << " " << solver << " " << bound.beams;
+  EXPECT_LT(rerr, start_rot - 1.0e-3f) << "no better than its start, s " << bound.s << " " << solver << " " << bound.beams;
+}
+
 template <typename TConfig, template <typename> class Reg, std::size_t N>
 void run_1210(const Bound1210 (&bounds)[N])
 {
   for (const auto & bound : bounds) {
     for (const std::string solver : {"GaussNewton", "LevenbergMarquardt"}) {
-      const auto r = farlio_planar_solve::register_scan<TConfig, Reg>(
-        solver, bound.beams, true, farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f), bound.s);
-      // Error in the truth's body frame: x along the track, y across it.
-      const Eigen::Vector3f e = r.truth.so3().inverse() * (r.pose.translation() - r.truth.translation());
-      const bool straight = is_straight(bound.s);
-      const float pos = straight ? std::abs(e.y()) : std::hypot(e.x(), e.y());
-      const float rerr = farlio_planar_solve::rot_err_deg(r.pose, r.truth);
-      std::printf("FARLIO_1210 s %.0f %s %s %d beams: along %.4f lateral %.4f m, asserted %.4f m (<= %.3f), %.3f deg (<= %.3f)\n",
-        bound.s, straight ? "straight" : "curve", solver.c_str(), bound.beams, e.x(), e.y(), pos, bound.pos_m, rerr,
-        bound.rot_deg);
-      EXPECT_LE(pos, bound.pos_m) << "s " << bound.s << " " << solver << " " << bound.beams;
-      EXPECT_LE(rerr, bound.rot_deg) << "s " << bound.s << " " << solver << " " << bound.beams;
-      // Beats its start (review B1). Several bounds above exceed the start offset, so a matcher that returns its
-      // guess would pass them. The start error is the same metric of the start offset: the lateral part on a
-      // straight, the total on a curve, and the rotation of the offset. Every measured row is below it (worst
-      // ICP s=30 64 beams: 0.1017 m vs 0.128 m, 1.776 deg vs 2.000 deg).
-      const Sophus::SE3f start_offset = farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f);
-      const float start_pos = straight ? std::abs(start_offset.translation().y())
-                                       : std::hypot(start_offset.translation().x(), start_offset.translation().y());
-      const float start_rot = farlio_planar_solve::rot_err_deg(start_offset, Sophus::SE3f());
-      EXPECT_LT(pos, start_pos - 1.0e-3f) << "no better than its start, s " << bound.s << " " << solver << " " << bound.beams;
-      EXPECT_LT(rerr, start_rot - 1.0e-3f) << "no better than its start, s " << bound.s << " " << solver << " " << bound.beams;
+      check_1210_row<TConfig, Reg>(bound, solver);
     }
   }
 }
 
 /// FARLIO-1220 / 1230: planar on leaves z, roll and pitch at the (projected) guess, tilted or not.
 template <typename TConfig, template <typename> class Reg>
+void check_1220_1230(const std::string & solver, const float roll_deg)
+{
+  Sophus::SE3f off = farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f);
+  off = Sophus::SE3f(
+    off.unit_quaternion() * Eigen::Quaternionf(Eigen::AngleAxisf(
+                              roll_deg * static_cast<float>(M_PI) / 180.0f, Eigen::Vector3f::UnitX())),
+    off.translation());
+  const auto r = farlio_planar_solve::register_scan<TConfig, Reg>(solver, 1080, true, off);
+  EXPECT_EQ(r.pose.translation().z(), 0.0f) << solver << " roll " << roll_deg;
+  EXPECT_EQ(r.pose.unit_quaternion().x(), 0.0f) << solver << " roll " << roll_deg;
+  EXPECT_EQ(r.pose.unit_quaternion().y(), 0.0f) << solver << " roll " << roll_deg;
+}
+
+template <typename TConfig, template <typename> class Reg>
 void run_1220_1230()
 {
   for (const std::string solver : {"GaussNewton", "LevenbergMarquardt"}) {
-    for (const float roll_deg : {0.0f, 1.0f}) {
-      Sophus::SE3f off = farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f);
-      off = Sophus::SE3f(
-        off.unit_quaternion() * Eigen::Quaternionf(Eigen::AngleAxisf(
-                                  roll_deg * static_cast<float>(M_PI) / 180.0f, Eigen::Vector3f::UnitX())),
-        off.translation());
-      const auto r = farlio_planar_solve::register_scan<TConfig, Reg>(solver, 1080, true, off);
-      EXPECT_EQ(r.pose.translation().z(), 0.0f) << solver << " roll " << roll_deg;
-      EXPECT_EQ(r.pose.unit_quaternion().x(), 0.0f) << solver << " roll " << roll_deg;
-      EXPECT_EQ(r.pose.unit_quaternion().y(), 0.0f) << solver << " roll " << roll_deg;
-    }
+    for (const float roll_deg : {0.0f, 1.0f}) check_1220_1230<TConfig, Reg>(solver, roll_deg);
   }
 }
 
@@ -237,4 +296,4 @@ void run_1240()
   std::printf("FARLIO_1240 planar off drift %.3e\n", drift);
   EXPECT_GT(drift, 1.0e-6f);
 }
-#endif  // __CUDACC__
+
