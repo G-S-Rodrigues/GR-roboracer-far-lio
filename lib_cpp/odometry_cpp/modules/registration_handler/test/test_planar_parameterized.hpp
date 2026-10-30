@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 #pragma once
-// FARLIO-1200..1240: the planar (SE(2)) solve on the synthetic F1TENTH track. Included by
-// unit_gicp.cpp and unit_icp.cpp. (FARLIO-1250 is the step-1c golden staying bit-exact.)
+// FARLIO-1200..1240: the planar (SE(2)) solve on the synthetic F1TENTH track. Included by unit_gicp.cpp,
+// unit_icp.cpp, unit_gicp.cu and unit_icp.cu. (FARLIO-1250 is the step-1c golden staying bit-exact.)
 // Compiled twice: as host code (unit_gicp.cpp, unit_icp.cpp) and as device code (unit_gicp.cu, unit_icp.cu), where
 // the map and the matcher are the cuda:: ones and the frame is a thrust::device_vector. The fixture, the offsets
 // and the asserts are the same text; the bound tables are per backend (kGicp1210 / kGicp1210Cuda, ...).

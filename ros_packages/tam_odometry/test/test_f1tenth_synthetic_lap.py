@@ -51,7 +51,7 @@ have 3-6 runs and may have a second mode they have not shown; a flaky failure th
 
 kin = ekf_2d_kin (IMU only), nh = ekf_2d_nh (vehicle model + per-wheel speeds from the rigid-body kinematics);
 the case is chosen by FARLIO_LAP_CASE, set in CMakeLists.txt. The plan's 0.10 m / 2 deg is met by none of them.
-kin1080 has a second position mode (2026-10-30): of 19 further normal runs, 18 read 3.96-4.47 m and one read
+kin1080 has a second position mode (2026-10-30): of 11 further normal runs, 10 read 3.96-4.47 m and one read
 9.035 m with yaw 0.313 deg (load about 8), over the 8.94 m bound set from the first ten. The position bound is
 therefore 2 x the worst of all runs = 18.1 m. The yaw worst stays 0.605 deg (the 0.313 deg run is below it), so
 1.21 deg stands.
