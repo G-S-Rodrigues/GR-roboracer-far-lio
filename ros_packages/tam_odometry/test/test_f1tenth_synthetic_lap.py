@@ -51,9 +51,13 @@ have 3-6 runs and may have a second mode they have not shown; a flaky failure th
 
 kin = ekf_2d_kin (IMU only), nh = ekf_2d_nh (vehicle model + per-wheel speeds from the rigid-body kinematics);
 the case is chosen by FARLIO_LAP_CASE, set in CMakeLists.txt. The plan's 0.10 m / 2 deg is met by none of them.
-Bite check: FARLIO_LAP_NOISE_X=2 doubles the scan noise; the record is in the part 4 hand-off.
+Bite check: FARLIO_LAP_NOISE_X scales the scan noise and FARLIO_LAP_BEAMS overrides the beam count; the record is
+in the part 4 hand-off. kin1080 (bound 8.94 m) is NOT tripped by 2x noise (8.751 m) or 4x noise (2.521 m, the error is
+not monotonic in the noise), but IS tripped by 32 beams: 37.184 m, yaw 0.191 deg, path 1.1472 of the lap
+(2026-10-30). That is the named degradation of kin1080.
 
-Asserts: /core/state/odometry keeps >= 0.9 x the scan rate, the drift bounds above, and z, roll and pitch exactly 0.
+Asserts: /core/state/odometry keeps >= 0.9 x the scan rate, the drift bounds above, the path length of the estimate
+within PATH_FRACTION of the lap, and z, roll and pitch exactly 0.
 """
 import math
 import os
@@ -81,7 +85,7 @@ STRAIGHT, RADIUS, HALF_WIDTH = 8.0, 3.0, 1.1
 # The case: filter (kin = IMU only; nh = vehicle model + per-wheel speeds) x beam count, set by the CMake entry.
 CASE = os.environ.get('FARLIO_LAP_CASE', 'kin64')
 EKF_EXEC = 'tam_state_estimation_node_ekf_' + ('2d_nh' if CASE.startswith('nh') else '2d_kin')
-NUM_BEAMS = int(CASE.lstrip('kinh'))
+NUM_BEAMS = int(os.environ.get('FARLIO_LAP_BEAMS', CASE.lstrip('kinh')))   # FARLIO_LAP_BEAMS: bite check only
 FOV, RANGE_MIN, RANGE_MAX = 4.7, 0.06, 10.0
 # FARLIO_LAP_NOISE_X scales the 3 cm scan noise: the bite check of each case's bound (see the docstring)
 SIGMA = 0.03 * float(os.environ.get('FARLIO_LAP_NOISE_X', '1'))
@@ -96,6 +100,12 @@ BOUNDS = {
     'nh1080': (3.03, 0.78),
 }
 MAX_POS_ERR_M, MAX_YAW_ERR_DEG = BOUNDS[CASE]
+# Path length of the estimate over the lap, as a fraction of the lap length LAP_M: one band for all four cases.
+# Measured 2026-10-30, 3 runs per case: kin1080 1.0055 1.0142 1.0040, kin64 1.0178 1.0198 1.0201, nh64 1.0228
+# 1.0216 1.0212, nh1080 1.0149 1.0140 1.0149 (worst deviation from 1: 0.0228). Band = 1 +- 2 x that, rounded up to
+# 0.05. It is the check on the estimate that moves, one lap of it: a frozen estimator travels 0, and kin1080 with 32
+# beams (FARLIO_LAP_BEAMS=32) travels 1.1472, outside the band.
+PATH_FRACTION = (0.95, 1.05)
 GRAVITY = 9.81
 SEED = 20261026
 MAP_PCD = os.path.join(tempfile.mkdtemp(prefix='farlio_1610_'), 'map.pcd')
@@ -304,8 +314,14 @@ class TestSyntheticLap(unittest.TestCase):
             self.assertEqual(p.position.z, 0.0, 'z is not 0')
             self.assertEqual(p.orientation.x, 0.0, 'roll is not 0')
             self.assertEqual(p.orientation.y, 0.0, 'pitch is not 0')
+        path = sum(math.hypot(b[1].pose.pose.position.x - a[1].pose.pose.position.x,
+                              b[1].pose.pose.position.y - a[1].pose.pose.position.y) for a, b in zip(lap, lap[1:]))
+        print(f'FARLIO_1610 path length {path:.3f} m = {path / LAP_M:.4f} of the lap {LAP_M:.3f} m')
         print(f'FARLIO_1610 rate {rate:.1f} Hz of {RATE:.0f}, worst position error {worst_pos:.4f} m, '
               f'worst yaw error {worst_yaw:.3f} deg, {len(lap)} poses over {lap_seconds:.1f} s')
+        lo, hi = PATH_FRACTION
+        self.assertGreaterEqual(path / LAP_M, lo, f'the estimate travelled {path:.2f} m of a {LAP_M:.2f} m lap')
+        self.assertLessEqual(path / LAP_M, hi, f'the estimate travelled {path:.2f} m of a {LAP_M:.2f} m lap')
         self.assertGreaterEqual(rate, 0.9 * RATE, f'odometry rate {rate:.1f} Hz')
         self.assertLessEqual(worst_pos, MAX_POS_ERR_M, f'worst position error {worst_pos:.3f} m')
         self.assertLessEqual(worst_yaw, MAX_YAW_ERR_DEG, f'worst yaw error {worst_yaw:.3f} deg')
