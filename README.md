@@ -75,6 +75,62 @@ An excerpt of FAR-LIO running on an autonomous race car on a racetrack as part o
 See the [documentation](https://tumftm.github.io/FAR-LIO/) for the architecture and further
 application domains.
 
+## 2D lidar (F1TENTH)
+
+A single-layer scan (a 2D lidar on a small car) can be registered in SE(2). The mode is a parameter,
+`pipeline.lidar_2d` (default `false`; with it off every 3D path runs the original code, held by the
+bit-exact golden tests FARLIO-1010..1030). With it on:
+
+- **Covariance extrusion.** A planar wall's neighbourhood has two near-zero eigenvalues, across the wall and
+  along z, so the smallest eigenvector (the normal) can be z and constrain nothing in the plane. Before the
+  eigen-decomposition the z row and column of the covariance are replaced by an analytic vertical extrusion
+  (`planarize_covariance`), so the normal is always in-plane. CPU and CUDA share the helper.
+- **SE(2) solve.** Gauss-Newton and Levenberg-Marquardt solve the reduced 3x3 system in (t_x, t_y, w_z) and
+  embed it back with zeros in t_z, w_x, w_y; the initial guess is first projected to SE(2) (`project_se2`).
+  A parametrization rather than a prior: z, roll and pitch cannot move (tests assert them bit-equal to the
+  guess), and the float32 6x6 system is never made ill-conditioned by a large prior weight.
+- **LaserScan input.** `node.input_scan:=/scan` makes the nodes subscribe `sensor_msgs/LaserScan` (same
+  best-effort QoS as the point-cloud input) and convert it with `laser_geometry`; beams are placed at
+  `angle_min + i*angle_increment`, and non-finite or out-of-range ranges are dropped. Empty (the default) keeps
+  the PointCloud2 input.
+- **`config/f1tenth.yml`** is `config/far-lio.yml` with F1TENTH values, each changed value commented with its
+  source. It runs `tam_gicp_ext` with `ekf_2d_kin` (IMU only; the vehicle-model values are recorded for
+  `ekf_2d_nh`).
+
+**What the tests measure (and do not claim).** A single scan cannot observe its position along a straight
+between parallel walls, so FARLIO-1210 (one registration from a 0.10 m / -0.08 m / 2 deg offset) asserts only
+lateral error and heading on straights and records the along-track error (0.09-0.13 m at 64 beams, i.e. the
+offset left uncorrected). It asserts 1 cm / 0.2 deg where that is met (GICP at 1080 beams on straights, and one
+curve position); elsewhere each case has a bound of twice its measured worst (GICP on curves 0.05-0.18 m,
+ICP on curves 0.16-0.20 m). FARLIO-1610 (one synthetic lap at 2 m/s, 2 s ramp, ekf_2d_kin or ekf_2d_nh, 64
+or 1080 beams) records drift of 1.5-8.9 m worst position and 0.2-1.1 deg yaw, against bounds of twice that; it
+does not meet 0.10 m / 2 deg in any case. Neither test is an accuracy claim: localization on a map built by
+FAR-LIO itself is measured in the GR-roboracer stack.
+
+**64-beam density caveat.** Fraction of frame points that get a covariance (FARLIO-1100, synthetic stadium
+track, mean over 12 poses): 64 beams 0.000 at 0.25 m voxels, 0.605 at 0.5 m, 0.697 at 1.0 m; 1080 beams 0.921,
+0.944, 0.950. `config/f1tenth.yml` uses 0.5 m. A 64-beam scan is sparse: point-to-point ICP (`tam_icp_ext`)
+needs no covariance, and the node executable (not a yml key) chooses between the two.
+
+**CPU latency** (FARLIO-1710, `bench_planar_example`, registration only, planar GaussNewton, one thread,
+200 scans per case, a 2 cm guess error): GICP_EXT 0.102 ms mean / 0.271 ms p99 at 64 beams and 0.394 / 1.081
+ms at 1080; ICP_EXT 0.054 / 0.135 ms at 64 and 0.569 / 1.126 ms at 1080. Reported, not gated; it excludes
+preprocessing, map update and ROS.
+
+Build and test (CPU, in the `deps` image; the CUDA build is compiled in CI and its tests run by hand on a GPU):
+
+```bash
+docker build -f docker/Dockerfile --target deps -t gr-far-lio-deps .
+docker run --rm -v "$PWD":/dev_ws/src/far_lio -v gr-far-lio-build:/dev_ws/out -w /dev_ws gr-far-lio-deps bash -lc '
+  . /opt/ros/jazzy/setup.bash &&
+  colcon --log-base out/log build --build-base out/build-cpu --install-base out/install-cpu \
+    --packages-up-to tam_odometry tam_state_estimation_node \
+    --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_CUDA=OFF -DBUILD_TESTING=ON &&
+  colcon --log-base out/log test --build-base out/build-cpu --install-base out/install-cpu \
+    --packages-select tam_odometry tam_state_estimation_node &&
+  colcon test-result --test-result-base out/build-cpu --verbose'
+```
+
 ## References
 
 If you use FAR-LIO in your research, please cite our paper:

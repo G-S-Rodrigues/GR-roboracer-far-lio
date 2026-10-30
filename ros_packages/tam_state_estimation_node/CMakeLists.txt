@@ -116,4 +116,14 @@ ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET) # so client can 
 # section: GENERAL
 # ====================================================================
 ament_export_dependencies(rclcpp_components ${NODE_DEPENDENCIES}) # other dependencies so client does not need to call find_package on them
+if(BUILD_TESTING)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_ekf_2d_kin_gym_like.py TARGET farlio_1050_zero_accel TIMEOUT 90
+    ENV FARLIO_VARIANT=zero_accel FARLIO_MIN_ERR_M=1.0)
+  add_launch_test(test/test_ekf_2d_kin_gym_like.py TARGET farlio_1050_body_accel TIMEOUT 90
+    ENV FARLIO_VARIANT=body_accel)
+  add_launch_test(test/test_ekf_2d_kin_gym_like.py TARGET farlio_1050_nh TIMEOUT 90
+    ENV FARLIO_VARIANT=nh)
+endif()
+
 ament_package()

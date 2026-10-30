@@ -1080,6 +1080,7 @@ public:
       // x,y,z coordintates
       output.position_m.x = x_out_[TConfig::STATE_POS_X_M];
       output.position_m.y = x_out_[TConfig::STATE_POS_Y_M];
+      output.position_m.z = 0.0;  // planar filter: the Vector3D has no default member initialiser (FARLIO_1620)
 
       // roll, pitch, yaw
       output.orientation_rad.x = 0.0;

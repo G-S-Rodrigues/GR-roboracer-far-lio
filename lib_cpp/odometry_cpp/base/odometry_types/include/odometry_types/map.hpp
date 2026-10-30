@@ -49,6 +49,7 @@ struct MapConfig {
   double voxel_size{0.0};
   double max_distance{0.0};
   std::string cov_regularization{"SVD"};  // Options: "SVD", "FROBENIUS", "MIN_EIGENVALUE"
+  bool planar{false};  // true: single-layer (2D) scans, covariance extruded vertically (not a ROS parameter)
 };
 
 /**

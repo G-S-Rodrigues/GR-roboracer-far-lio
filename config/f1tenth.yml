@@ -1,0 +1,182 @@
+# =======================================================================================
+# F1TENTH 2D lidar parameters (RoboRacer gym: 64-beam /scan at 100 Hz + one /imu)
+# Derived from far-lio.yml key by key: unchanged keys stay, every changed value carries a comment with
+# its source, so a later diff against upstream's key set is mechanical. The 64-beam density caveat and the
+# voxel choice are step 1b's (FARLIO_1100).
+# Launch (part 5): tam_gicp_ext or tam_icp_ext, plus tam_state_estimation_node_ekf_2d_kin, with this file.
+# =======================================================================================
+/core/state:
+  StateEstimation:
+    ros__parameters:
+      use_sim_time: true  # ADR 0006: the stack runs on simulated time
+      node:
+        odom_frame_id: far_lio_odom  # standalone frame, not the stack's odom -> base_link (part 5 decides the wiring)
+        child_frame_id: base_link
+      enable:
+        measurement_covariance_adaptation: true
+        mahalanobis_outlier_rejection: true
+        initialize_from_measurements: true
+        track_angle_measurement: false
+        reference_angle_measurement: false  # far-lio.yml: true; the 2D state has no roll/pitch
+      state_machine:
+        min_valid_imus: 1  # code default is 2 (state_estimation.hpp:531); the gym has one IMU
+        overwrite_pose_covariance_threshold: 0.05
+      hard_outlier_rejection:
+        treshold:
+          linear_velocity_mps: 10.0
+          angular_velocity_radps: 6.0  # F1TENTH yaw rates; far-lio.yml has 1.0 (KITTI)
+          accelerometer_mps2: 1000.0
+        max_consecutive_outlier:
+          linear_velocity: 250
+          imu: 50
+      measurements:
+        lidar_gicp:
+          message:
+            topic: /core/state/lidar_odometry
+            type: nav_msgs/msg/Odometry
+            timeout_ms: 500
+            additional_delay_ms: 0
+          status:
+            topic: /core/state/lidar_odometry_status
+            timeout_ms: 500
+          position_m:
+            R_init: [0.05, 0.05]  # EKF_2D sizes: position 2, orientation 1, velocity 2
+            outlier_bounds: [5.0, 5.0]
+          orientation_rad:
+            R_init: [0.0002]
+            outlier_bounds: [0.3]
+          linear_velocity_mps:
+            R_init: [0.6, 1.0]
+            outlier_bounds: [2.0, 2.0]
+      inputs:
+        bias_init: [0.0, 0.0, 0.0]
+        average_delay_ms: 10
+        imus:
+          primary:
+            message:
+              topic: /imu  # far-lio.yml: /kitti/oxts/imu
+              type: sensor_msgs/msg/Imu
+              timeout_ms: 500
+            filter_coefficients: [0.07722183762197628, 0.24522338986219644, 0.34256086202951863, 0.24522338986219644, 0.07722183762197628]
+      kalman_filter:
+        Q: [0.0003, 0.003, 0.003]  # EKF_2D: d(psi), ax, ay (3 entries); values proven in step 1a' (FARLIO_1050)
+        covariance_adaption:
+          limit: 0.60
+          decay: 0.00150
+          virtual_scale: 10.0
+      vehicle_model:
+        linear_velocity_mps:
+          R_init: [0.1, 1.2]
+          outlier_bounds: [2.0, 1.0]
+        parameter:
+          tyreradius_front_m: 0.058  # f1tenth.urdf; unused by ekf_2d_kin, recorded for ekf_2d_nh (O1)
+          tyreradius_rear_m: 0.058
+          rr_vel_scale_vel_points_mps: [0.0, 100.0]
+          rr_vel_scale_scale_factors: [1.00, 1.00]
+          l_WheelbaseF_m: 0.15855
+          l_WheelbaseR_m: 0.17145
+
+# =======================================================================================
+# Odometry Node
+# =======================================================================================
+  LidarOdometry:
+    ros__parameters:
+      use_sim_time: true
+      # Node:
+      node:
+        odom_frame: "far_lio_odom"  # far-lio.yml: local_cartesian; standalone frame, avoids the stack's odom -> base_link
+        child_frame: "base_link"
+        cloud_frame: "laser"  # the gym scan frame (static TF base_link -> laser from the sim)
+        wait_tf: false  # far-lio.yml: false. With true tam_gicp_ext waits for the EKF TF handshake while ekf_2d_kin
+        # (initialize_from_measurements) waits for the first lidar odometry: a deadlock, 0 poses (FARLIO_1610)
+        input_pointcloud: "/kitti/velo/pointcloud" # unused: node.input_scan below replaces it
+        input_scan: "/scan"  # new key (step 6): the gym's 64-beam LaserScan
+        input_pointcloud_status: ""
+        output_odom: "lidar_odometry" # Namespace set globally
+        input_map: "" # Path to folder containing "map.pcd" and "origin.yml"
+        update_map_srv: "" # Service to trigger map update (disabled if empty)
+      # Pipeline
+      pipeline:
+        update_map: true
+        undistort: false  # scan time_increment is 0, nothing to undistort
+        preprocess: true
+        downsample: false
+        buffer_z: false
+        lidar_2d: true  # new key (step 5): register and output in SE(2)
+        debug_mode: true
+        num_threads: 1
+      # Covariance
+      covariance:
+        min_cov_translation:
+        - 0.01
+        - 0.01
+        - 0.02
+        min_cov_orientation:
+        - 0.02
+        - 0.02
+        - 0.0001
+        min_cov_linear_twist:
+        - 0.1
+        - 0.1
+        - 0.1
+        min_cov_angular_twist:
+        - 0.01
+        - 0.01
+        - 0.01
+      # Diagnostic
+      diagnostic:
+        check_input_status: false
+        frame_outdated: 100.0 # [ms] checked against the 100 Hz scan rate (10 ms period): unchanged
+        check_forward: false
+        min_motion_threshold: 0.5
+        check_ellipsis: true
+        ellipsis_size_s: 0.15 # [m] 3 m/s x 10 ms = 0.03 m per scan, x5 margin; far-lio.yml: 5.0 (KITTI, 10 Hz)
+        ellipsis_size_d: 0.075 # [m] half of ellipsis_size_s, as in far-lio.yml
+        check_time_diff: true
+        max_time_diff: 50.0 # [ms] checked against 100 Hz: five periods, unchanged
+        enable_vel: true
+        check_vel: true
+        vel_motion_threshold: 0.0 # [m]
+      distortion:
+        max_time_diff: 30.0
+        vel_threshold: 3.0
+      # Map
+      map:
+        frame_map: false
+        voxel_size: 0.5 # [m] step 1b: 64 beams need >= 0.5 m for a covariance on >= 50 % of frame points
+        max_distance: 15.0 # [m] scan range_max is 10 m
+        cov_regularization: "FROBENIUS" # Options: "SVD", "MIN_EIGENVALUE", "FROBENIUS"
+      # Model
+      model:
+        initial_pos_x: 0.0 # [m]
+        initial_pos_y: 0.0 # [m]
+        initial_pos_z: 0.0 # [m]
+        initial_rot_x: 0.0 # [quat]
+        initial_rot_y: 0.0 # [quat]
+        initial_rot_z: 0.0 # [quat]
+        initial_rot_w: 1.0 # [quat]
+      # Preprocessing
+      preprocessing:
+        # Crop points by range from origin
+        crop_range:  # Size == 2: [min, max] in meters - otherwise disabled
+        - 0.06
+        - 10.0  # [min, max] m: the gym scan has range_min 0.06 and range_max 10
+        # Vehicle footprint filtering (exclude points within vehicle body)
+        crop_footprint:  # Size == 2: [longitudinal, lateral] in meters - otherwise disabled
+        - 0.0
+      # Registration
+      registration:
+        solver_type: "GaussNewton" # Options: "GaussNewton", "LevenbergMarquardt"
+        max_iter: 500
+        max_inner_iter: 10
+        max_time: 200.0 # [ms]
+        convergence_criterion: 5.0e-3
+        damping_factor: 1.0e-9
+        damping_scale: 2.0 # Only used for "LevenbergMarquardt"
+      # Threshold
+      threshold:
+        initial_threshold: 0.2  # far-lio.yml: 1.0
+        min_motion_threshold: 0.02  # far-lio.yml: 0.25
+        max_correspondence_range: 10.0  # far-lio.yml: 100.0; scan range_max
+      # Velocity
+      # velocity:

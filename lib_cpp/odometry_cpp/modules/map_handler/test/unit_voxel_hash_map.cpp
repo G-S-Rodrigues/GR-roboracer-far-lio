@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "test_planar_covariance.hpp"
 #include "test_utils.hpp"
 
 /**

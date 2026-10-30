@@ -1,0 +1,74 @@
+# Minimal EKF_2D parameters for FARLIO-1050: one IMU (as the RoboRacer gym publishes), lidar odometry
+# as the only position / orientation / velocity source. Derived from config/far-lio.yml's
+# StateEstimation block with the vectors re-sized to EKF_2D (Q: 3, position R: 2, orientation R: 1,
+# velocity R: 2).
+/core/state:
+  StateEstimation:
+    ros__parameters:
+      use_sim_time: false
+      node:
+        odom_frame_id: local_cartesian
+        child_frame_id: base_link
+      enable:
+        measurement_covariance_adaptation: true
+        mahalanobis_outlier_rejection: true
+        initialize_from_measurements: true
+        track_angle_measurement: false
+        reference_angle_measurement: false
+      state_machine:
+        min_valid_imus: 1
+        overwrite_pose_covariance_threshold: 0.05
+      hard_outlier_rejection:
+        treshold:
+          linear_velocity_mps: 10.0
+          angular_velocity_radps: 6.0
+          accelerometer_mps2: 1000.0
+        max_consecutive_outlier:
+          linear_velocity: 250
+          imu: 50
+      measurements:
+        lidar_gicp:
+          message:
+            topic: /core/state/lidar_odometry
+            type: nav_msgs/msg/Odometry
+            timeout_ms: 500
+            additional_delay_ms: 0
+          status:
+            topic: /core/state/lidar_odometry_status
+            timeout_ms: 500
+          position_m:
+            R_init: [0.05, 0.05]
+            outlier_bounds: [5.0, 5.0]
+          orientation_rad:
+            R_init: [0.0002]
+            outlier_bounds: [0.3]
+          linear_velocity_mps:
+            R_init: [0.6, 1.0]
+            outlier_bounds: [2.0, 2.0]
+      inputs:
+        bias_init: [0.0, 0.0, 0.0]
+        average_delay_ms: 10
+        imus:
+          primary:
+            message:
+              topic: /imu
+              type: sensor_msgs/msg/Imu
+              timeout_ms: 500
+            filter_coefficients: [0.07722183762197628, 0.24522338986219644, 0.34256086202951863, 0.24522338986219644, 0.07722183762197628]
+      kalman_filter:
+        Q: [0.0003, 0.003, 0.003]
+        covariance_adaption:
+          limit: 0.60
+          decay: 0.00150
+          virtual_scale: 10.0
+      vehicle_model:
+        linear_velocity_mps:
+          R_init: [0.1, 1.2]
+          outlier_bounds: [2.0, 1.0]
+        parameter:
+          tyreradius_front_m: 0.058
+          tyreradius_rear_m: 0.058
+          rr_vel_scale_vel_points_mps: [0.0, 100.0]
+          rr_vel_scale_scale_factors: [1.00, 1.00]
+          l_WheelbaseF_m: 0.15855
+          l_WheelbaseR_m: 0.17145

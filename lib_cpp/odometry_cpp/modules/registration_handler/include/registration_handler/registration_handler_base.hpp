@@ -112,6 +112,16 @@ public:
       tbb::global_control(tbb::global_control::max_allowed_parallelism, static_cast<size_t>(num_threads));
   }
 
+  /// Store the planar (SE(2)) flag; set by the pipeline before init_frame_map
+  void set_planar(const bool planar) { this->config_.planar = planar; }
+
+  /// Config of the frame map (tests and diagnostics)
+  const types::MapConfig& get_frame_map_config() const
+    requires types::FRAMEMAP<TConfig>
+  {
+    return frame_map_->get_config();
+  }
+
   /**
    * @brief Initialize frame map instance if necessary
    * @param [in] config Configuration for the map
@@ -313,10 +323,14 @@ protected:
       const types::LinearSystem& ls = utils::build_linear_system(correspondences, factor);
 #endif
       // Solve linear system
-      const Eigen::Matrix<float, 6, 1> dx =
-        (ls.JTJ + static_cast<float>(this->config_.damping_factor) * Eigen::Matrix<float, 6, 6>::Identity())
-          .ldlt()
-          .solve(-ls.JTr);
+      Eigen::Matrix<float, 6, 1> dx;
+      if (this->config_.planar) {
+        dx = this->planar_step(ls, static_cast<float>(this->config_.damping_factor));
+      } else {
+        dx = (ls.JTJ + static_cast<float>(this->config_.damping_factor) * Eigen::Matrix<float, 6, 6>::Identity())
+               .ldlt()
+               .solve(-ls.JTr);
+      }
       const Sophus::SE3f estimation = Sophus::SE3f::exp(dx);
       // Transform points with new estimate
 #ifdef __CUDACC__
@@ -404,16 +418,26 @@ protected:
       Sophus::SE3f delta_lm = Sophus::SE3f();
       // Set initial lambda for first iteration
       if (j == 0) {
-        current_lambda = std::max(
-          static_cast<float>(this->config_.damping_factor) * ls.JTJ.diagonal().array().abs().maxCoeff(), 1.0e-12f);
+        if (this->config_.planar) {
+          // damping scales with the dof actually solved: the reduced (t_x, t_y, w_z) diagonal
+          const float planar_max = std::max({std::abs(ls.JTJ(0, 0)), std::abs(ls.JTJ(1, 1)), std::abs(ls.JTJ(5, 5))});
+          current_lambda = std::max(static_cast<float>(this->config_.damping_factor) * planar_max, 1.0e-12f);
+        } else {
+          current_lambda = std::max(
+            static_cast<float>(this->config_.damping_factor) * ls.JTJ.diagonal().array().abs().maxCoeff(), 1.0e-12f);
+        }
       }
       // Start Levenberg-Marquardt inner loop
       bool success_lm = false;
       float nu = static_cast<float>(this->config_.damping_scale);
       for (std::int64_t lm_iter = 0; lm_iter < this->config_.max_inner_iter; ++lm_iter) {
         // Solve linear system
-        const Eigen::Matrix<float, 6, 1> candidate_dx =
-          (ls.JTJ + current_lambda * Eigen::Matrix<float, 6, 6>::Identity()).ldlt().solve(-ls.JTr);  // NOLINT
+        Eigen::Matrix<float, 6, 1> candidate_dx;
+        if (this->config_.planar) {
+          candidate_dx = this->planar_step(ls, current_lambda);
+        } else {
+          candidate_dx = (ls.JTJ + current_lambda * Eigen::Matrix<float, 6, 6>::Identity()).ldlt().solve(-ls.JTr);  // NOLINT
+        }
         delta_lm = Sophus::SE3f::exp(candidate_dx);
         // Set the transformation to the factor
         error.set_transform(delta_lm);
@@ -523,6 +547,25 @@ protected:
 protected:
   // Map handler for the frame
   std::unique_ptr<MapHandler<TConfig>> frame_map_{nullptr};
+
+  /**
+   * @brief Damped Gauss-Newton / LM step in SE(2): solve the reduced 3x3 system in (t_x, t_y, w_z)
+   * (rows/cols 0, 1, 5 of the 6x6) and scatter it back into a 6-vector with zeros elsewhere
+   */
+  static Eigen::Matrix<float, 6, 1> planar_step(const types::LinearSystem & ls, const float damping)
+  {
+    constexpr int idx[3] = {0, 1, 5};
+    Eigen::Matrix3f A;
+    Eigen::Vector3f b;
+    for (int i = 0; i < 3; ++i) {
+      b(i) = -ls.JTr(idx[i]);
+      for (int j = 0; j < 3; ++j) A(i, j) = ls.JTJ(idx[i], idx[j]);
+    }
+    const Eigen::Vector3f x = (A + damping * Eigen::Matrix3f::Identity()).ldlt().solve(b);
+    Eigen::Matrix<float, 6, 1> dx = Eigen::Matrix<float, 6, 1>::Zero();
+    for (int i = 0; i < 3; ++i) dx(idx[i]) = x(i);
+    return dx;
+  }
 // Cuda specific code and members
 #ifdef __CUDACC__
 protected:

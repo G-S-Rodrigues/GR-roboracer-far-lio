@@ -37,6 +37,7 @@ struct RegistrationConfig {
   double convergence_criterion{5.0e-3};
   double damping_factor{0.0};
   double damping_scale{10.0};  // Only used for LM solver
+  bool planar{false};          // true: solve in SE(2) (t_x, t_y, w_z); set by the pipeline, not a ROS parameter
 };
 
 /**

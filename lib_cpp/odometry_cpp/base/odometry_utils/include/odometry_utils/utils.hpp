@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -254,4 +255,16 @@ points_normals2rerun(const std::vector<types::Point<TConfig>>& points, const std
   return std::make_tuple(positions, colors, normals);
 }
 #endif
+
+/**
+ * @brief Project a pose to SE(2) for planar odometry: roll and pitch are set to zero, yaw, x, y and z are kept
+ */
+inline Sophus::SE3f project_se2(const Sophus::SE3f& pose)
+{
+  const Eigen::Quaternionf q = pose.unit_quaternion();
+  // yaw of the ZYX decomposition
+  const float yaw = std::atan2(2.0f * (q.w() * q.z() + q.x() * q.y()), 1.0f - 2.0f * (q.y() * q.y() + q.z() * q.z()));
+  return Sophus::SE3f(Eigen::Quaternionf(Eigen::AngleAxisf(yaw, Eigen::Vector3f::UnitZ())), pose.translation());
+}
+
 }  // namespace tam::core::state::utils

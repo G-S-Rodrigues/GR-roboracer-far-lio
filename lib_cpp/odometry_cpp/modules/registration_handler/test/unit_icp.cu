@@ -68,3 +68,20 @@ TEST(CUDAICP, BuildConfigDebug)
 INSTANTIATE_TEST_SUITE_P(CUDAICPCombinations, ICPParameterizedTest,
   ::testing::Values(TestParams{"SVD", "GaussNewton"}, TestParams{"SVD", "LevenbergMarquardt"}),
   [](const ::testing::TestParamInfo<TestParams>& info) { return info.param.string(); });
+
+#include "test_planar_parameterized.hpp"
+TEST(FARLIO_1210, CUDA_ICP_PlanarSolve)
+{
+  CHECK_CUDA_ERROR();
+  run_1210<tam::core::state::types::CUDA_ICP_EXT, tam::core::state::cuda::ICP>(kIcp1210Cuda);
+}
+TEST(FARLIO_1220, CUDA_ICP_PlanarKeepsZRollPitch)
+{
+  CHECK_CUDA_ERROR();
+  run_1220_1230<tam::core::state::types::CUDA_ICP_EXT, tam::core::state::cuda::ICP>();
+}
+TEST(FARLIO_1240, CUDA_ICP_NonPlanarDrifts)
+{
+  CHECK_CUDA_ERROR();
+  run_1240<tam::core::state::types::CUDA_ICP_EXT, tam::core::state::cuda::ICP>();
+}

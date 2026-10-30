@@ -1,0 +1,75 @@
+name: test
+
+# Fork-side CI (not upstreamed): CPU build + tests, and a CUDA compile with tests built but not run
+# (a GitHub runner has no GPU; the CUDA tests run by hand on a GPU machine).
+#
+# `colcon test` exits 0 on test failures; only `colcon test-result --verbose` returns non-zero, so
+# the CPU job ends with it.
+
+on:
+  push:
+    branches: [main, 'ci-scratch/**']
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space (the CUDA devel image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the deps image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: deps
+          load: true
+          tags: far-lio-deps:ci
+          cache-from: type=gha,scope=deps
+          cache-to: type=gha,scope=deps,mode=max
+      - name: Prepare the reference tree (upstream ef20510 plus the golden tests)
+        run: scripts/ci_prepare_ref.sh "$RUNNER_TEMP/far-lio-ref"
+      - name: CPU build, same-job golden, tests
+        run: |
+          docker run --rm -v "$PWD":/dev_ws/src/far_lio -v "$RUNNER_TEMP/far-lio-ref":/ref_ws/src/far_lio \
+            -w /dev_ws far-lio-deps:ci bash -lc '/dev_ws/src/far_lio/scripts/ci_cpu.sh'
+
+  cuda-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space (the CUDA devel image is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the deps image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: deps
+          load: true
+          tags: far-lio-deps:ci
+          cache-from: type=gha,scope=deps
+      - name: CUDA compile (no GPU, tests built but not run)
+        run: |
+          docker run --rm -v "$PWD":/dev_ws/src/far_lio -w /dev_ws far-lio-deps:ci bash -lc '
+            set -e
+            . /opt/ros/jazzy/setup.bash
+            colcon --log-base out/log build --build-base out/build-cuda --install-base out/install-cuda \
+              --packages-up-to tam_odometry tam_state_estimation_node \
+              --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_CUDA=ON -DCUDA_ARCHITECTURES=89 -DBUILD_TESTING=ON'

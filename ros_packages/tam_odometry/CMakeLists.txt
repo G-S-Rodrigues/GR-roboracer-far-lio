@@ -28,6 +28,7 @@ set(NODE_DEPENDENCIES
   tf2_geometry_msgs
   geometry_msgs
   sensor_msgs
+  laser_geometry
   nav_msgs
   pcl_conversions
   PCL
@@ -107,5 +108,19 @@ install(TARGETS ${PROJECT_NAME}
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}
   )
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_pytest REQUIRED)
+  # launch_testing: the LaserScan input (FARLIO-1410..1440)
+  ament_add_pytest_test(test_scan_input test/test_scan_input.py TIMEOUT 180)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  # FARLIO_1510: config/f1tenth.yml in both nodes of the pair
+  add_launch_test(test/test_f1tenth_config.py TARGET farlio_1510 TIMEOUT 120)
+  # FARLIO_1610: one synthetic lap through the 2D node pair
+  foreach(case kin64 kin1080 nh64 nh1080)
+    add_launch_test(test/test_f1tenth_synthetic_lap.py TARGET farlio_1610_${case} TIMEOUT 240)
+    set_tests_properties(farlio_1610_${case} PROPERTIES ENVIRONMENT "FARLIO_LAP_CASE=${case}")
+  endforeach()
+endif()
 
 ament_package()

@@ -45,6 +45,7 @@ if(BUILD_TESTING)
   set(TESTS
     unit_icp
     unit_gicp
+    unit_planar_density
   )
   set(TESTS_CUDA
     unit_icp
@@ -73,6 +74,7 @@ if(BUILD_ODOMETRY_EXAMPLES)
   set(EXAMPLES
     icp
     gicp
+    bench_planar
   )
   set(EXAMPLES_CUDA
     icp

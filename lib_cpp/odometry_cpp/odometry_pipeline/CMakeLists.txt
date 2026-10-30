@@ -60,13 +60,22 @@ install(TARGETS ${PROJECT_NAME}
 if(BUILD_TESTING)
   set(TESTS
     unit_odometry_pipeline
+    unit_3d_golden
   )
   include(GoogleTest)
   foreach(TEST ${TESTS})
     add_executable(${TEST} test/${TEST}.cpp)
     target_link_libraries(${TEST} ${PROJECT_NAME} GTest::gtest_main)
+    target_compile_definitions(${TEST} PRIVATE FARLIO_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
     gtest_discover_tests(${TEST})
   endforeach()
+  if(BUILD_CUDA)
+    add_executable(unit_3d_golden_cuda test/unit_3d_golden.cu)
+    target_link_libraries(unit_3d_golden_cuda ${PROJECT_NAME} GTest::gtest_main)
+    target_compile_definitions(unit_3d_golden_cuda PRIVATE FARLIO_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test/data")
+    set_cuda_architecture(unit_3d_golden_cuda)
+    gtest_discover_tests(unit_3d_golden_cuda)
+  endif()
 endif()
 
 # ==============================================================================

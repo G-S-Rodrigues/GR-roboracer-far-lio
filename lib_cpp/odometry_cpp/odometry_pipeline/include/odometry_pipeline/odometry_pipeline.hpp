@@ -142,6 +142,9 @@ public:
   types::ModelConfig& get_model_config();
   types::PreprocessingConfig& get_preprocessing_config();
   types::RegistrationConfig& get_registration_config();
+  /// Config of the registration's frame map (FRAMEMAP configs only)
+  const types::MapConfig& get_frame_map_config() const
+    requires types::FRAMEMAP<TConfig>;
   types::ThresholdConfig& get_threshold_config();
   types::VelocityConfig& get_velocity_config();
   /**

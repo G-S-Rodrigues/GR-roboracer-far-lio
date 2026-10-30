@@ -89,6 +89,10 @@ types::Odometry OdometryPipeline<TConfig>::register_frame(
   if (this->odometry_.status.level == types::DiagnosticLevel::OK && this->config_.buffer_z) {
     init_guess.pose.translation().z() = this->odometry_.pose.pose.translation().z();
   }
+  // 2D lidar: the guess lives in SE(2) (roll and pitch zero; z kept, as the registration keeps it)
+  if (this->config_.lidar_2d) {
+    init_guess.pose = utils::project_se2(init_guess.pose);
+  }
 
   // Catch empty frame
   // Copying an empty vector to the GPU leads to an invalid device ordinal error
@@ -279,6 +283,9 @@ template <typename TConfig>
 void OdometryPipeline<TConfig>::init()
 {
   this->distortion_->init(this->config_.num_threads);
+  // planar flags before any module builds structures from its config (the frame map copies the map's)
+  this->map_->set_planar(this->config_.lidar_2d);
+  this->registration_->set_planar(this->config_.lidar_2d);
   this->map_->init(this->config_.num_threads, this->config_.update_map);
   this->registration_->init(this->config_.num_threads);
   this->preprocessing_->init();
@@ -469,6 +476,10 @@ types::PreprocessingConfig & OdometryPipeline<TConfig>::get_preprocessing_config
 template <typename TConfig>
 types::RegistrationConfig & OdometryPipeline<TConfig>::get_registration_config() { return registration_->get_config(); }  // NOLINT
 template <typename TConfig>
+const types::MapConfig & OdometryPipeline<TConfig>::get_frame_map_config() const
+  requires types::FRAMEMAP<TConfig>
+{ return registration_->get_frame_map_config(); }  // NOLINT
+template <typename TConfig>
 types::ThresholdConfig & OdometryPipeline<TConfig>::get_threshold_config() { return threshold_->get_config(); }  // NOLINT
 template <typename TConfig>
 types::VelocityConfig & OdometryPipeline<TConfig>::get_velocity_config() { return velocity_->get_config(); }  // NOLINT
@@ -608,6 +619,7 @@ void OdometryPipeline<TConfig>::set_config(tam::pmg::ParamReferenceManager* pmg)
   pmg->declare_parameter("pipeline.preprocess", &this->config_.preprocess, true, tam::pmg::ParameterType::BOOL, "Preprocess point cloud");  // NOLINT
   pmg->declare_parameter("pipeline.downsample", &this->config_.downsample, true, tam::pmg::ParameterType::BOOL, "Downsample point cloud");  // NOLINT
   pmg->declare_parameter("pipeline.buffer_z", &this->config_.buffer_z, true, tam::pmg::ParameterType::BOOL, "Buffer Z position from previous pose");  // NOLINT
+  pmg->declare_parameter("pipeline.lidar_2d", &this->config_.lidar_2d, false, tam::pmg::ParameterType::BOOL, "2D lidar: single-layer scan, register and output in SE(2)");  // NOLINT
   pmg->declare_parameter("pipeline.debug_mode", &this->config_.debug_mode, false, tam::pmg::ParameterType::BOOL, "Enable debug mode");  // NOLINT
   pmg->declare_parameter("pipeline.num_threads", &this->config_.num_threads, static_cast<int64_t>(1), tam::pmg::ParameterType::INTEGER, "Number of TBB threads (CPU pipeline)");  // NOLINT
   // clang-format on

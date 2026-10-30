@@ -25,6 +25,7 @@
 #include <sophus/se3.hpp>
 #include <string>
 
+#include "map_handler/planar_covariance.hpp"
 #include "odometry_types/map.hpp"
 #include "odometry_types/point_types.hpp"
 
@@ -35,10 +36,11 @@ namespace tam::core::state::cuda::utils {
  * @param [in] num_points         Number of points in the input point cloud
  * @param [in] cov_regularization Covariance regularization type
  * @param [in] num_neighbors      Number of neighbors per point
+ * @param [in] planar             Extrude the covariance vertically (single-layer scans)
  */
 template <typename TConfig>
 __global__ void set_normal_covariance_kernel(types::Neighbors<TConfig>* neighbors, const size_t num_points,
-  const types::CovRegularizationType cov_regularization, const int16_t num_neighbors)
+  const types::CovRegularizationType cov_regularization, const int16_t num_neighbors, const bool planar = false)
 {
   auto tid = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -54,7 +56,8 @@ __global__ void set_normal_covariance_kernel(types::Neighbors<TConfig>* neighbor
       const Eigen::Vector3f mean = sum_pts / static_cast<float>(neighbors[tid].num_neighbors);
       for (int16_t i = 0; i < neighbors[tid].num_neighbors; ++i)
         sum_pts_cov += (neighbors[tid].neighbor[i]->pos - mean) * (neighbors[tid].neighbor[i]->pos - mean).transpose();  // NOLINT
-      const Eigen::Matrix3f cov = sum_pts_cov / static_cast<float>(neighbors[tid].num_neighbors);
+      Eigen::Matrix3f cov = sum_pts_cov / static_cast<float>(neighbors[tid].num_neighbors);
+      if (planar) tam::core::state::utils::planarize_covariance(cov);
 
       // Compute the normal
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> eigensolver;

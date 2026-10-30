@@ -28,6 +28,7 @@ struct PipelineConfig {
   bool downsample{true};
   bool buffer_z{true};
   bool debug_mode{false};
+  bool lidar_2d{false};  // single-layer 2D lidar: register and output in SE(2)
   std::int64_t num_threads{1};
 };
 
