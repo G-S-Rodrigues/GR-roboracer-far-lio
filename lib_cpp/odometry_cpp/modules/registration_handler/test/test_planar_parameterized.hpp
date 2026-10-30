@@ -188,6 +188,16 @@ void run_1210(const Bound1210 (&bounds)[N])
         bound.rot_deg);
       EXPECT_LE(pos, bound.pos_m) << "s " << bound.s << " " << solver << " " << bound.beams;
       EXPECT_LE(rerr, bound.rot_deg) << "s " << bound.s << " " << solver << " " << bound.beams;
+      // Beats its start (review B1). Several bounds above exceed the start offset, so a matcher that returns its
+      // guess would pass them. The start error is the same metric of the start offset: the lateral part on a
+      // straight, the total on a curve, and the rotation of the offset. Every measured row is below it (worst
+      // ICP s=30 64 beams: 0.1017 m vs 0.128 m, 1.776 deg vs 2.000 deg).
+      const Sophus::SE3f start_offset = farlio_planar_solve::offset_xy_yaw(0.10f, -0.08f, 2.0f);
+      const float start_pos = straight ? std::abs(start_offset.translation().y())
+                                       : std::hypot(start_offset.translation().x(), start_offset.translation().y());
+      const float start_rot = farlio_planar_solve::rot_err_deg(start_offset, Sophus::SE3f());
+      EXPECT_LT(pos, start_pos - 1.0e-3f) << "no better than its start, s " << bound.s << " " << solver << " " << bound.beams;
+      EXPECT_LT(rerr, start_rot - 1.0e-3f) << "no better than its start, s " << bound.s << " " << solver << " " << bound.beams;
     }
   }
 }
