@@ -26,6 +26,7 @@
 #include <filesystem>  // NOLINT
 #include <fstream>
 #include <geometry_msgs/msg/pose.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <iostream>
@@ -178,6 +179,22 @@ types::PoseStamped transform2pose(const geometry_msgs::msg::TransformStamped& tr
   const auto& t = transform.transform;
   pose.pose = Sophus::SE3f(Sophus::SE3f::QuaternionType(t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z),
     Sophus::SE3f::Point(t.translation.x, t.translation.y, t.translation.z));
+  return pose;
+}
+
+/**
+ * @brief Convert the pose of a geometry_msgs PoseWithCovarianceStamped to a Sophus pose (the covariance is dropped)
+ * @param[in] msg                - geometry_msgs::msg::PoseWithCovarianceStamped
+ * @return types::PoseStamped
+ */
+types::PoseStamped pose_msg2pose(const geometry_msgs::msg::PoseWithCovarianceStamped& msg)
+{
+  types::PoseStamped pose;
+  pose.stamp = stamp2ns(msg.header.stamp);
+  const auto& p = msg.pose.pose;
+  Sophus::SE3f::QuaternionType q(p.orientation.w, p.orientation.x, p.orientation.y, p.orientation.z);
+  q.normalize();
+  pose.pose = Sophus::SE3f(q, Sophus::SE3f::Point(p.position.x, p.position.y, p.position.z));
   return pose;
 }
 

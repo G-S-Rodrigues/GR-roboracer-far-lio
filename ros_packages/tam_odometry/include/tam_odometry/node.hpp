@@ -34,6 +34,9 @@ struct NodeConfig {
   std::string output_odom{};
   std::string input_map{};
   std::string update_map_srv{};
+  // geometry_msgs/PoseWithCovarianceStamped topic of the start pose (part 4b); empty = no subscription
+  std::string input_initial_pose{};
+  bool wait_initial_pose{false};  // drop scans until a start pose has arrived (part 4b)
 };
 
 /**

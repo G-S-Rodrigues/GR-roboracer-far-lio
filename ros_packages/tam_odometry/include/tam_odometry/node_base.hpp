@@ -21,6 +21,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -37,6 +38,7 @@
 #include <tf2_ros/transform_listener.h>
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -420,6 +422,15 @@ protected:
         update_ready_topic, qos_odom, std::bind(&NodeBase::update_ready_callback, this, std::placeholders::_1));
     }
 
+    // Start pose (part 4b): the latest valid pose before the first registered scan is that scan's guess
+    if (!this->config_.input_initial_pose.empty()) {
+      rclcpp::QoS qos_pose(rclcpp::KeepLast(1));
+      qos_pose.reliable().transient_local();
+      this->initial_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        this->config_.input_initial_pose, qos_pose,
+        std::bind(&NodeBase::initial_pose_callback, this, std::placeholders::_1));
+    }
+
     // Initialize publishers
     this->odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>(this->config_.output_odom, qos_odom);
 
@@ -452,6 +463,32 @@ protected:
   }
 
   /**
+   * @brief Start pose: stored as the guess of the next scan (the latest wins). The covariance is ignored.
+   */
+  void initial_pose_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg)
+  {
+    // A pose in any other frame than odom_frame is not a pose of this node's map: refused, not counted as told
+    if (msg->header.frame_id != this->config_.odom_frame) {
+      RCLCPP_WARN(this->get_logger(), "[%s]: initial pose in frame '%s' ignored: expected '%s'", this->get_name(),  // NOLINT
+        msg->header.frame_id.c_str(), this->config_.odom_frame.c_str());
+      return;
+    }
+    // One shot: after the first registered scan a pose would need a reset the library does not have
+    if (this->first_scan_registered_.load()) {
+      RCLCPP_WARN(this->get_logger(), "[%s]: initial pose ignored: relocalization not supported (a scan has been registered)", this->get_name());  // NOLINT
+      return;
+    }
+    static bool covariance_noted = false;
+    if (!covariance_noted) {
+      covariance_noted = true;
+      RCLCPP_INFO(this->get_logger(), "[%s]: initial pose received, its covariance is ignored", this->get_name());  // NOLINT
+    }
+    std::lock_guard<std::mutex> lock(initial_pose_mutex_);
+    this->pending_initial_pose_ = utils::pose_msg2pose(*msg);
+    this->told_.store(true);
+  }
+
+  /**
    * @brief Declare common configuration parameters for the node
    */
   void set_config_common(tam::pmg::ParamReferenceManager* pmg)
@@ -466,6 +503,8 @@ protected:
     pmg->declare_parameter("node.output_odom", &this->config_.output_odom, "/core/state/lidar_odometry", tam::pmg::ParameterType::STRING, "Topic for the odometry output");  // NOLINT
     pmg->declare_parameter("node.input_map", &this->config_.input_map, "/core/map/get_pointcloud_map", tam::pmg::ParameterType::STRING, "Path to a .pcd file to load or name of the GetPointCloudMap service");  // NOLINT
     pmg->declare_parameter("node.update_map_srv", &this->config_.update_map_srv, "", tam::pmg::ParameterType::STRING, "Name of the GetPointCloudMap service for asynchronous map updates. The trigger topic is derived by appending '_ready'. Leave empty to disable.");  // NOLINT
+    pmg->declare_parameter("node.input_initial_pose", &this->config_.input_initial_pose, "", tam::pmg::ParameterType::STRING, "Topic of a geometry_msgs/PoseWithCovarianceStamped start pose (RELIABLE, TRANSIENT_LOCAL), in node.odom_frame, the pose of node.child_frame. It is the guess of the next scan; one shot, before the first registered scan. Needs an EXTERNALGUESS model. Empty: no subscription");  // NOLINT
+    pmg->declare_parameter("node.wait_initial_pose", &this->config_.wait_initial_pose, false, tam::pmg::ParameterType::BOOL, "Drop scans, and register and publish nothing, until a valid start pose has arrived on node.input_initial_pose. Not with node.wait_tf");  // NOLINT
                                              // clang-format on
   }
 
@@ -516,5 +555,11 @@ protected:
   rclcpp::Client<tum_map_msgs::srv::GetPointCloudMap>::SharedPtr update_map_client_{};
   rclcpp::Subscription<std_msgs::msg::Header>::SharedPtr update_ready_sub_{};
   std::atomic<bool> update_in_progress_{false};
+  // Start pose (part 4b)
+  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_sub_{};
+  std::mutex initial_pose_mutex_;
+  std::atomic<bool> told_{false};                  // a valid start pose has arrived
+  std::atomic<bool> first_scan_registered_{false};  // a scan has been registered: later poses are ignored
+  std::optional<types::PoseStamped> pending_initial_pose_{};
 };
 }  // namespace tam::core::state

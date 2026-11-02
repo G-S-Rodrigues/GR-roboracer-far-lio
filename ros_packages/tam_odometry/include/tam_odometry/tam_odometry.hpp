@@ -18,6 +18,9 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -39,6 +42,7 @@ public:
     // Call common initialization here to be able to call set_config/set_logging,
     // which are pure virtual in the base class
     this->init_node_common();
+    this->check_initial_pose_config();
     // Initialize node and pipeline if not using external guess
     if constexpr (TConfig::MODEL != types::ModelType::EXTERNALGUESS) {
       // Set member variable for initialization to true as waiting for odometry is not necessary
@@ -57,6 +61,25 @@ public:
   ~OdometryNode() override = default;
 
 private:
+  /**
+   * @brief Refuse configurations that would run and silently not do what they say (part 4b). Called after the
+   * parameters are populated.
+   */
+  void check_initial_pose_config() const
+  {
+    if (this->config_.wait_tf && this->config_.wait_initial_pose) {
+      throw std::invalid_argument(
+        "node.wait_initial_pose and node.wait_tf are both true: the hold waits for a pose, wait_tf for the EKF's tf, "
+        "and the EKF waits for the first lidar odometry (deadlock)");
+    }
+    if constexpr (TConfig::MODEL != types::ModelType::EXTERNALGUESS) {
+      if (!this->config_.input_initial_pose.empty()) {
+        throw std::invalid_argument(
+          "node.input_initial_pose is set but the model is not EXTERNALGUESS and would never apply the pose");
+      }
+    }
+  }
+
   void timer_callback() override
   {
     // Check for timeouts
@@ -97,6 +120,11 @@ private:
       return;
     }
 
+    // Hold: nothing is registered or published until a valid start pose has arrived (part 4b)
+    if (this->config_.wait_initial_pose && !this->told_.load()) {
+      return;
+    }
+
     // Start timer
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -111,8 +139,16 @@ private:
       types::PoseStamped init_guess{};
       bool valid_guess{true};
       std::string tf_error;
-      // Try to fetch initial guess from tf
-        if (this->tf_buffer_->canTransform(this->config_.odom_frame, this->config_.child_frame, msg_ptr->header.stamp, tf2::durationFromSec(0.0), &tf_error)) {  // NOLINT
+      // A told start pose (part 4b) is this scan's guess, ahead of the tf lookups
+      std::optional<types::PoseStamped> told_pose;
+      {
+        std::lock_guard<std::mutex> lock(this->initial_pose_mutex_);
+        told_pose.swap(this->pending_initial_pose_);
+      }
+      if (told_pose.has_value()) {
+        init_guess = *told_pose;
+        init_guess.stamp = utils::stamp2ns(msg_ptr->header.stamp);
+      } else if (this->tf_buffer_->canTransform(this->config_.odom_frame, this->config_.child_frame, msg_ptr->header.stamp, tf2::durationFromSec(0.0), &tf_error)) {  // NOLINT
           init_guess = utils::transform2pose(this->tf_buffer_->lookupTransform(this->config_.odom_frame, this->config_.child_frame, msg_ptr->header.stamp));  // NOLINT
         } else if (this->tf_buffer_->canTransform(this->config_.odom_frame, this->config_.child_frame, tf2::TimePointZero, tf2::durationFromSec(0.0), &tf_error)) {  // NOLINT
           init_guess = utils::transform2pose(this->tf_buffer_->lookupTransform(this->config_.odom_frame, this->config_.child_frame, tf2::TimePointZero));  // NOLINT
@@ -130,6 +166,7 @@ private:
     this->set_undistortion_poses(utils::stamp2ns(msg_ptr->header.stamp));
     // Register frame
     types::Odometry odom = this->pipeline_->register_frame(frame, utils::stamp2ns(msg_ptr->header.stamp));
+    this->first_scan_registered_.store(true);
 
     // Compute elapsed time
     // clang-format off
