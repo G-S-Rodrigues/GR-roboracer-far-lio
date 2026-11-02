@@ -29,6 +29,8 @@ import launch_testing.actions
 import launch_testing.asserts
 import pytest
 import rclpy
+from rcl_interfaces.msg import ParameterType
+from rcl_interfaces.srv import GetParameters
 
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'config', 'f1tenth.yml')
 
@@ -73,3 +75,31 @@ class TestF1tenthConfig(unittest.TestCase):
             proc_info.assertWaitForShutdown(process=odometry, timeout=1)
         for bad in ('InvalidParameter', 'ParameterUninitialized', 'terminate called', 'what():'):
             self.assertFalse(proc_output.waitFor(bad, timeout=0.5), bad)
+
+    def test_farlio_1810_initial_pose_keys(self, proc_output, odometry, ekf):
+        """Part 4b: the odometry node declares the initial-pose input (topic set, hold off) and the EKF starts
+        from measurements."""
+        proc_output.assertWaitFor('Node initialized', process=odometry, timeout=60)
+        rclpy.init()
+        node = rclpy.create_node('f1tenth_config_probe_1810')
+        try:
+            def get(target, name):
+                client = node.create_client(GetParameters, target + '/get_parameters')
+                self.assertTrue(client.wait_for_service(timeout_sec=30.0), target + ' has no get_parameters')
+                req = GetParameters.Request()
+                req.names = [name]
+                fut = client.call_async(req)
+                rclpy.spin_until_future_complete(node, fut, timeout_sec=10.0)
+                values = fut.result().values
+                self.assertTrue(values and values[0].type != ParameterType.PARAMETER_NOT_SET, '%s: parameter %s not declared'
+                                    % (target, name))
+                return values[0]
+            topic = get('/core/state/LidarOdometry', 'node.input_initial_pose')
+            self.assertEqual(topic.string_value, '/core/state/initial_pose')
+            hold = get('/core/state/LidarOdometry', 'node.wait_initial_pose')
+            self.assertIs(hold.bool_value, False)
+            init = get('/core/state/StateEstimation', 'enable.initialize_from_measurements')
+            self.assertIs(init.bool_value, True)
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()

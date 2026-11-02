@@ -95,6 +95,8 @@
         output_odom: "lidar_odometry" # Namespace set globally
         input_map: "" # Path to folder containing "map.pcd" and "origin.yml"
         update_map_srv: "" # Service to trigger map update (disabled if empty)
+        input_initial_pose: "/core/state/initial_pose"  # new key (part 4b): geometry_msgs/PoseWithCovarianceStamped in odom_frame, RELIABLE TRANSIENT_LOCAL; the pose of child_frame, the next scan's guess (one shot)
+        wait_initial_pose: false  # new key (part 4b): true drops scans until a pose has arrived. Not with wait_tf. false: FARLIO_1610 publishes no pose
       # Pipeline
       pipeline:
         update_map: true
