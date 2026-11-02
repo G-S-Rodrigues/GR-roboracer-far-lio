@@ -97,14 +97,48 @@ bit-exact golden tests FARLIO-1010..1030). With it on:
   source. It runs `tam_gicp_ext` with `ekf_2d_kin` (IMU only; the vehicle-model values are recorded for
   `ekf_2d_nh`).
 
+- **Lidar yaw in the 2D EKF.** The upstream node read `mask[0..2]` (roll, pitch, yaw) of a one-entry
+  `orientation_rad` mask in 2D, so the lidar yaw was never fused and the filter started at yaw 0. It now reads the
+  yaw flag only (`mask[0]`), and a 2D `orientation_rad` whose `R_init` is not one entry (three in 3D) is refused at
+  startup (FARLIO-1890, 1900, 1910).
+
+### Initial pose (`node.input_initial_pose`)
+
+By default the first scan is registered at the identity, which in localization mode is wherever the mapping run
+started. For the `EXTERNALGUESS` executables (`tam_gicp_ext`, `tam_icp_ext`, `tam_cuda_*_ext`):
+
+- `node.input_initial_pose` (default `""`: no subscription; `config/f1tenth.yml`: `/core/state/initial_pose`) is a
+  `geometry_msgs/msg/PoseWithCovarianceStamped` topic, **RELIABLE, TRANSIENT_LOCAL, depth 1** (a latched
+  publisher; a VOLATILE one, such as RViz's `SetInitialPose` tool on `/initialpose`, is never heard). The
+  `header.frame_id` must be `node.odom_frame` (`far_lio_odom`); any other frame is refused with a WARN. The pose is
+  that of `node.child_frame` (`base_link`); z, roll and pitch are dropped in 2D. The stamp and covariance are
+  ignored.
+- The latest valid pose received before the first registered scan is that scan's guess, ahead of the tf lookup.
+  **One shot:** a pose after the first registered scan is ignored with a WARN ("relocalization not supported").
+- `node.wait_initial_pose` (default `false`): scans are dropped, and nothing is registered or published, until a
+  valid pose has arrived. The EKF publishes nothing either. Not with `node.wait_tf: true` (the node refuses to
+  start), and a non-empty `input_initial_pose` on `tam_icp_cv` (constant velocity, no guess) is refused too.
+- **The told pose must already be accurate to about 0.1 m / 2 deg.** The input does not correct a rough pose.
+  The matcher's acceptance check (`pipeline.diagnostic.ellipsis_size_s` 0.15 m x `ellipsis_size_d` 0.075 m around
+  the guess, `config/f1tenth.yml:135-136`) marks a registration further than that from its guess "converged | too
+  far from guess" (level 2), and the EKF then never initialises. Measured on the synthetic oval: offsets of 0, 0.05 m
+  / 0.02 m / 1 deg and 0.1 m / 0.05 m / 2 deg start the EKF; 0.3 m / 0.2 m / 5 deg does not. The matcher also
+  barely corrects an offset (first odometry 0.051 m from the truth at a 0.054 m offset). Correcting a rough pose is
+  not done here.
+- Tests: FARLIO-1810 (keys), 1820 (hold), 1830 (pose is the first guess), 1840 (frame), 1850 (one shot), 1860
+  (startup refusals), 1870 (through `ekf_2d_kin` and `ekf_2d_nh`), 1880 (the 1830 case on `tam_cuda_gicp_ext`, by hand
+  on a GPU).
+
 **What the tests measure (and do not claim).** A single scan cannot observe its position along a straight
 between parallel walls, so FARLIO-1210 (one registration from a 0.10 m / -0.08 m / 2 deg offset) asserts only
 lateral error and heading on straights and records the along-track error (0.09-0.13 m at 64 beams, i.e. the
 offset left uncorrected). It asserts 1 cm / 0.2 deg where that is met (GICP at 1080 beams on straights, and one
 curve position); elsewhere each case has a bound of twice its measured worst (GICP on curves 0.05-0.18 m,
 ICP on curves 0.16-0.20 m). FARLIO-1610 (one synthetic lap at 2 m/s, 2 s ramp, ekf_2d_kin or ekf_2d_nh, 64
-or 1080 beams) records drift of 1.5-8.9 m worst position and 0.2-1.1 deg yaw, against bounds of twice that; it
-does not meet 0.10 m / 2 deg in any case. Neither test is an accuracy claim: localization on a map built by
+or 1080 beams) records drift of 1.6-11.5 m worst position and 0.4-14.8 deg yaw (10 runs per case, with the EKF
+fusing the lidar yaw), against bounds of twice that; it does not meet 0.10 m / 2 deg in any case. The yaw is
+GICP's: it is tens of degrees wrong on this lap, and before the 2D yaw fix the EKF's yaw was the integral of the
+test's exact simulated gyro instead (`research/2026-11-02-far-lio-1610-yaw-measured.md` in GR-roboracer's scratch). Neither test is an accuracy claim: localization on a map built by
 FAR-LIO itself is measured in the GR-roboracer stack.
 
 **64-beam density caveat.** Fraction of frame points that get a covariance (FARLIO-1100, synthetic stadium
