@@ -27,6 +27,17 @@ One IMU plus lidar odometry as the only position / orientation / velocity source
               (tum_msgs/TUMFloat64PerWheelStamped) and /vehicle/sensor/wheelspeed_status.
 
 It asserts /core/state/odometry >= 0.9 x 100 Hz and records the worst position error.
+
+Worst position error m, 10 runs per variant, before and after the 2D yaw-flag fix (FARLIO_1890; the lidar yaw was
+never fused before it). Before: 141fa3b. After: the fix, 2026-11-01, load < 8. The bounds are unchanged.
+
+    variant      before (min - max)     after (min - max)      bound
+    zero_accel   4.8394 - 4.8755        4.9169 - 4.9435        > 1.0 (divergence is the expected result)
+    body_accel   0.0166 - 0.0329        0.0166 - 0.0319        0.05
+    nh           0.0150 - 0.0319        0.0145 - 0.0313        0.05
+
+The stamp age is 0.0105 - 0.0111 s in all 60 runs (bound 0.030). The circle's yaw is consistent with the lidar's, so
+fusing it changes nothing measurable here.
 The measurement twist is in the body frame: state_estimation.hpp (set_input_linear_velocity,
 2D branch) rotates it only by pitch and roll (vector_to_2d), never by yaw.
 """

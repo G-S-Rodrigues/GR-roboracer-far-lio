@@ -126,6 +126,12 @@ void parse_sensor_configs(rclcpp::Node* node, tam::pmg::MgmtInterface* param_man
     // Match fusion configs for the measurements
     setup_fusion_config("position_m", cfg.position_m, num_position);
     setup_fusion_config("orientation_rad", cfg.orientation_rad, num_orientation);
+    // the orientation channel is roll, pitch, yaw in 3D and yaw alone in 2D; node.hpp indexes its mask by that
+    if (cfg.orientation_rad.active) {
+      const size_t expected_size = TConfig::THREE_DIMENSIONAL ? 3 : 1;
+      if (cfg.orientation_rad.R_init.size() != expected_size)
+        throw std::invalid_argument("[StateEstimationCPP]: Measurement input configuration for " + cfg.name + " provides " + std::to_string(cfg.orientation_rad.R_init.size()) + " entries for orientation_rad, expected " + std::to_string(expected_size)); // NOLINT
+    }
     setup_fusion_config("linear_velocity_mps", cfg.linear_velocity_mps, num_linear_velocity);
     measurement_channels.push_back(channel);
     // clang-format on

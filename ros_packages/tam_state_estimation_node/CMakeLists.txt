@@ -124,6 +124,16 @@ if(BUILD_TESTING)
     ENV FARLIO_VARIANT=body_accel)
   add_launch_test(test/test_ekf_2d_kin_gym_like.py TARGET farlio_1050_nh TIMEOUT 90
     ENV FARLIO_VARIANT=nh)
+  foreach(case kin nh)
+    add_launch_test(test/test_ekf_2d_yaw_fusion.py TARGET farlio_1890_${case} TIMEOUT 90
+      ENV FARLIO_YAW_CASE=${case}_1890)
+    add_launch_test(test/test_ekf_2d_yaw_fusion.py TARGET farlio_1900_${case} TIMEOUT 90
+      ENV FARLIO_YAW_CASE=${case}_1900)
+  endforeach()
+  foreach(case 2d_mis_sized 3d_accepts)
+    add_launch_test(test/test_ekf_2d_yaw_fusion.py TARGET farlio_1910_${case} TIMEOUT 60
+      ENV FARLIO_YAW_CASE=${case})
+  endforeach()
 endif()
 
 ament_package()

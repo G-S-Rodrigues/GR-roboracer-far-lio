@@ -337,9 +337,16 @@ private:
           if (measurement.config.position_m.active)
             state_estimation_->set_input_position(input, measurement.config.position_m.num);
           if (measurement.config.orientation_rad.active)
-            state_estimation_->set_input_orientation(input, measurement.config.orientation_rad.num,
-              measurement.config.orientation_rad.mask[0], measurement.config.orientation_rad.mask[1],
-              measurement.config.orientation_rad.mask[2]);
+            if constexpr (TConfig::THREE_DIMENSIONAL) {
+              state_estimation_->set_input_orientation(input, measurement.config.orientation_rad.num,
+                measurement.config.orientation_rad.mask[0], measurement.config.orientation_rad.mask[1],
+                measurement.config.orientation_rad.mask[2]);
+            } else {
+              // 2D: orientation_rad has one entry (yaw), so the mask has one entry too (helper.hpp checks the
+              // size); mask[1] and mask[2] would read past its end. The 2D filter reads only the yaw flag.
+              state_estimation_->set_input_orientation(input, measurement.config.orientation_rad.num, false, false,
+                measurement.config.orientation_rad.mask[0]);
+            }
           if (measurement.config.linear_velocity_mps.active)
             state_estimation_->set_input_linear_velocity(input, measurement.config.linear_velocity_mps.num);
         } else {
