@@ -65,11 +65,37 @@ in the part 4 hand-off. kin1080 (bound 18.1 m) is NOT tripped by 2x noise (8.751
 not monotonic in the noise), but IS tripped by 32 beams: 37.184 m, yaw 0.191 deg, path 1.1472 of the lap
 (2026-10-30). That is the named degradation of kin1080.
 
+Re-set 2026-11-02 on the build with the 2D yaw-fusion fix (FARLIO_1890; the EKF now fuses the lidar yaw). Every
+bound above that is a "2 x worst" was measured with the lidar yaw unfused, so the pre-fix yaw was the integral of the
+harness's exact simulated gyro (<= 0.19 deg for kin1080), not a measurement of the pair. research/2026-11-02-far-lio-1610-yaw-measured.md
+showed that GICP's own yaw on this lap is tens of degrees wrong both before and after the fix (-113 deg peak on kin1080,
+98-99.9 % of registrations dropped as "too far from guess", the few accepted ones carrying 2-41 deg yaw error because the
+OK gate is position-only), and that no EKF yaw measurement noise R satisfies both FARLIO_1900 (R <= ~0.0005) and the old
+1610 limits (R >= 0.002). The owner ruled (2026-11-02) to keep the fix at R 0.0002 and re-set these limits on the fixed
+build; why GICP fails here, and gating accepted scans on yaw, is a separate part (4c). Each bound below is 2 x the worst of
+10 post-fix runs (load < 8, 2026-11-01/02):
+
+    case     position m (10 runs)                                                   yaw deg (10 runs)
+    kin64    11.27 8.93 9.54 11.49 8.87 8.89 8.89 8.97 9.69 11.30                    10.35 0.55 4.79 9.40 1.02 0.78 0.80 1.33 4.00 10.77
+    kin1080  4.02 4.23 4.52 4.11 4.12 4.11 4.51 4.12 4.22 4.54                       0.55 3.43 1.47 3.13 2.71 2.78 1.43 3.16 0.58 1.41
+    nh64     7.77 7.68 7.81 8.81 8.20 8.82 7.71 4.92 8.22 7.89                       13.30 14.81 13.71 14.61 14.76 14.49 14.05 5.68 14.47 14.27
+    nh1080   1.56 1.63 1.59 1.46 1.50 1.60 1.59 1.59 1.61 1.59                       3.28 3.52 3.28 0.81 0.44 3.33 3.32 3.32 3.29 3.32
+
+    bounds (position m / yaw deg), old -> new:  kin64 17.9 / 1.37 -> 23.0 / 21.6;  kin1080 18.1 / 1.21 -> 18.1 / 6.86
+    (position bound not tightened: its 2 x worst, 9.08 m, is below the 9.035 m second mode seen on 2026-10-30);
+    nh64 7.71 / 2.18 -> 17.7 / 29.7;  nh1080 3.03 / 0.78 -> 3.26 / 7.05.
+
+Path fraction of the estimate (10 runs): kin64 1.0570 1.0210 1.0217 1.0404 1.0179 1.0185 1.0184 1.0184 1.0241 1.0565;
+kin1080 1.0044-1.0087; nh64 1.0265 1.0325 1.0297 1.0565 1.0473 1.0530 1.0289 1.0274 1.0458 1.0396; nh1080 1.0164-1.0242.
+Worst deviation 0.0570, so the upper edge is 1 + 2 x 0.0570 = 1.114, rounded up to 1.12 (not to 0.05: that would be 1.15 and
+stop tripping kin1080 with 32 beams at 1.1472, the bite check above). The lower edge 0.95 is unchanged.
+
 Asserts: /core/state/odometry keeps >= 0.9 x the scan rate, the drift bounds above, the path length of the estimate
 within PATH_FRACTION of the lap, and z, roll and pitch exactly 0.
 """
 import math
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -88,25 +114,25 @@ from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Imu, LaserScan
 from tum_msgs.msg import TUMFloat64PerWheelStamped
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # launch_test does not put the test directory on the path
+from farlio_synthetic import (_segments, _wheel, _yaw, cast_scan, centerline_pose, FOV, HALF_TRACK, LAP_M,
+                              LASER_X, LASER_Z, LF, LR, NUM_BEAMS, RANGE_MAX, RANGE_MIN, write_map_pcd)
+
 CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'config', 'f1tenth.yml')
-LASER_X, LASER_Z = 0.10355, 0.031   # base_link -> laser (URDF, plan table)
-STRAIGHT, RADIUS, HALF_WIDTH = 8.0, 3.0, 1.1
 # The case: filter (kin = IMU only; nh = vehicle model + per-wheel speeds) x beam count, set by the CMake entry.
 CASE = os.environ.get('FARLIO_LAP_CASE', 'kin64')
 EKF_EXEC = 'tam_state_estimation_node_ekf_' + ('2d_nh' if CASE.startswith('nh') else '2d_kin')
-NUM_BEAMS = int(os.environ.get('FARLIO_LAP_BEAMS', CASE.lstrip('kinh')))   # FARLIO_LAP_BEAMS: bite check only
-FOV, RANGE_MIN, RANGE_MAX = 4.7, 0.06, 10.0
-# FARLIO_LAP_NOISE_X scales the 3 cm scan noise: the bite check of each case's bound (see the docstring)
-SIGMA = 0.03 * float(os.environ.get('FARLIO_LAP_NOISE_X', '1'))
-WHEEL_R, HALF_TRACK, LR, LF = 0.058, 0.118, 0.17145, 0.33 - 0.17145   # wheel radius, half track, CoG to axles
+# NUM_BEAMS (FARLIO_LAP_BEAMS: bite check only) and SIGMA (FARLIO_LAP_NOISE_X scales the 3 cm scan noise: the
+# bite check of each case's bound, see the docstring) come from farlio_synthetic, which reads the same environment
 RATE, SPEED, STAND_S, RAMP_S = 100.0, 2.0, 3.0, 2.0
 PACE = float(os.environ.get('FARLIO_LAP_PACE', '1.0'))   # wall seconds per sim second
 # case -> (max worst position error m, max worst yaw error deg): 2x the worst measured, see the docstring
 BOUNDS = {
-    'kin64': (17.9, 1.37),   # yaw: 2 x 0.683 deg, the worst of 11 runs (bimodal ~0.30 / ~0.665); owner ruling
-    'kin1080': (18.1, 1.21),   # position: 2 x 9.035 m, see the kin1080 note in the docstring; yaw unchanged
-    'nh64': (7.71, 2.18),
-    'nh1080': (3.03, 0.78),
+    # 2 x the worst of 10 runs on the fixed build, see "Re-set 2026-11-02" in the docstring
+    'kin64': (23.0, 21.6),
+    'kin1080': (18.1, 6.86),   # position kept at 18.1: 2 x the 4.54 m worst would be below the 9.035 m second mode
+    'nh64': (17.7, 29.7),
+    'nh1080': (3.26, 7.05),
 }
 MAX_POS_ERR_M, MAX_YAW_ERR_DEG = BOUNDS[CASE]
 # Path length of the estimate over the lap, as a fraction of the lap length LAP_M: one band for all four cases.
@@ -114,78 +140,10 @@ MAX_POS_ERR_M, MAX_YAW_ERR_DEG = BOUNDS[CASE]
 # 1.0216 1.0212, nh1080 1.0149 1.0140 1.0149 (worst deviation from 1: 0.0228). Band = 1 +- 2 x that, rounded up to
 # 0.05. It is the check on the estimate that moves, one lap of it: a frozen estimator travels 0, and kin1080 with 32
 # beams (FARLIO_LAP_BEAMS=32) travels 1.1472, outside the band.
-PATH_FRACTION = (0.95, 1.05)
+PATH_FRACTION = (0.95, 1.12)   # upper edge re-set 2026-11-02: 1 + 2 x 0.0570, see the docstring
 GRAVITY = 9.81
 SEED = 20261026
 MAP_PCD = os.path.join(tempfile.mkdtemp(prefix='farlio_1610_'), 'map.pcd')
-LAP_M = 2.0 * STRAIGHT + 2.0 * math.pi * RADIUS
-
-
-def stadium_wall(offset, spacing):
-    """Closed counter-clockwise polyline of the stadium wall at `offset` from the centerline."""
-    r, half = RADIUS + offset, STRAIGHT / 2.0
-    n_arc = max(int(math.pi * r / spacing), 1)
-    a = np.linspace(-math.pi / 2.0, math.pi / 2.0, n_arc, endpoint=False)
-    right = np.stack([half + r * np.cos(a), r * np.sin(a)], axis=1)
-    a = np.linspace(math.pi / 2.0, 3.0 * math.pi / 2.0, n_arc, endpoint=False)
-    left = np.stack([-half + r * np.cos(a), r * np.sin(a)], axis=1)
-    xs = np.arange(-half, half, spacing)
-    bottom = np.stack([xs, np.full_like(xs, -r)], axis=1)
-    top = np.stack([-xs, np.full_like(xs, r)], axis=1)
-    return np.concatenate([bottom, right, top, left])
-
-
-def centerline_pose(s):
-    """(x, y, yaw, curvature) at arc length s, counter-clockwise from (-4, -3), shifted so s = 0 is the origin."""
-    half, arc = STRAIGHT / 2.0, math.pi * RADIUS
-    u = s % LAP_M
-    if u < STRAIGHT:
-        x, y, yaw, k = -half + u, -RADIUS, 0.0, 0.0
-    elif u < STRAIGHT + arc:
-        a = -math.pi / 2.0 + (u - STRAIGHT) / RADIUS
-        x, y, yaw, k = half + RADIUS * math.cos(a), RADIUS * math.sin(a), a + math.pi / 2.0, 1.0 / RADIUS
-    elif u < 2.0 * STRAIGHT + arc:
-        x, y, yaw, k = half - (u - STRAIGHT - arc), RADIUS, math.pi, 0.0
-    else:
-        a = math.pi / 2.0 + (u - 2.0 * STRAIGHT - arc) / RADIUS
-        x, y, yaw, k = -half + RADIUS * math.cos(a), RADIUS * math.sin(a), a + math.pi / 2.0, 1.0 / RADIUS
-    return x + half, y + RADIUS, yaw, k
-
-
-def _segments(spacing):
-    segs = []
-    for off in (-HALF_WIDTH, HALF_WIDTH):
-        w = stadium_wall(off, spacing) + np.array([STRAIGHT / 2.0, RADIUS])   # same shift as centerline_pose
-        segs.append(np.stack([w, np.roll(w, -1, axis=0)], axis=1))
-    return np.concatenate(segs)   # (M, 2, 2): segment start and end
-
-
-def write_map_pcd(path):
-    pts = np.concatenate([stadium_wall(off, 0.05) + np.array([STRAIGHT / 2.0, RADIUS])
-                          for off in (-HALF_WIDTH, HALF_WIDTH)])
-    with open(path, 'w') as f:
-        f.write('# .PCD v0.7\nVERSION 0.7\nFIELDS x y z intensity\nSIZE 4 4 4 4\nTYPE F F F F\nCOUNT 1 1 1 1\n')
-        f.write(f'WIDTH {len(pts)}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS {len(pts)}\nDATA ascii\n')
-        for x, y in pts:
-            f.write(f'{x:.5f} {y:.5f} {LASER_Z:.5f} 0\n')
-
-
-def cast_scan(segs, x, y, yaw, rng):
-    """Ranges of 64 beams at their declared angles from the laser pose; inf when nothing is hit in range."""
-    ox, oy = x + LASER_X * math.cos(yaw), y + LASER_X * math.sin(yaw)
-    ang = yaw + (-FOV / 2.0 + np.arange(NUM_BEAMS) * FOV / (NUM_BEAMS - 1))
-    d = np.stack([np.cos(ang), np.sin(ang)], axis=1)                    # (N, 2)
-    a, e = segs[:, 0, :], segs[:, 1, :] - segs[:, 0, :]                 # (M, 2)
-    den = d[:, None, 0] * e[None, :, 1] - d[:, None, 1] * e[None, :, 0]  # (N, M)
-    ao = a - np.array([ox, oy])
-    with np.errstate(divide='ignore', invalid='ignore'):
-        t = (ao[None, :, 0] * e[None, :, 1] - ao[None, :, 1] * e[None, :, 0]) / den
-        u = (ao[None, :, 0] * d[:, None, 1] - ao[None, :, 1] * d[:, None, 0]) / den
-    ok = (np.abs(den) > 1e-12) & (t > 0.0) & (u >= 0.0) & (u <= 1.0)
-    r = np.where(ok, t, np.inf).min(axis=1)
-    r = r + SIGMA * rng.standard_normal(NUM_BEAMS)
-    r[(r > RANGE_MAX) | (r < RANGE_MIN)] = np.inf
-    return r
 
 
 @pytest.mark.launch_test
@@ -203,17 +161,6 @@ def generate_test_description():
                namespace='/core/state', name='StateEstimation', output='screen',
                parameters=[CONFIG, {'use_sim_time': True}])
     return LaunchDescription([tf, odometry, ekf, launch_testing.actions.ReadyToTest()])
-
-
-def _wheel(px, py, v, omega):
-    """Wheel speed (rad/s) of the wheel at (px, py) from the CoG: the rigid-body speed of that point."""
-    if abs(omega) < 1e-9:
-        return v / WHEEL_R
-    return omega * math.hypot(px, py - v / omega) / WHEEL_R
-
-
-def _yaw(q):
-    return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
 class TestSyntheticLap(unittest.TestCase):
