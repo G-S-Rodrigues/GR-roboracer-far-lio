@@ -72,6 +72,10 @@ private:
         "node.wait_initial_pose and node.wait_tf are both true: the hold waits for a pose, wait_tf for the EKF's tf, "
         "and the EKF waits for the first lidar odometry (deadlock)");
     }
+    if (this->config_.wait_initial_pose && this->config_.input_initial_pose.empty()) {
+      throw std::invalid_argument(
+        "node.wait_initial_pose is true but node.input_initial_pose is empty: nothing could ever release the hold");
+    }
     if constexpr (TConfig::MODEL != types::ModelType::EXTERNALGUESS) {
       if (!this->config_.input_initial_pose.empty()) {
         throw std::invalid_argument(
@@ -139,11 +143,12 @@ private:
       types::PoseStamped init_guess{};
       bool valid_guess{true};
       std::string tf_error;
-      // A told start pose (part 4b) is this scan's guess, ahead of the tf lookups
+      // A told start pose (part 4b) is this scan's guess, ahead of the tf lookups. It is only read here: it is
+      // consumed below, once a registration has actually run (an empty scan must not use it up)
       std::optional<types::PoseStamped> told_pose;
       {
         std::lock_guard<std::mutex> lock(this->initial_pose_mutex_);
-        told_pose.swap(this->pending_initial_pose_);
+        told_pose = this->pending_initial_pose_;
       }
       if (told_pose.has_value()) {
         init_guess = *told_pose;
@@ -165,8 +170,17 @@ private:
     // Set deskewing poses to the pipeline by sampling tf around the frame stamp
     this->set_undistortion_poses(utils::stamp2ns(msg_ptr->header.stamp));
     // Register frame
-    types::Odometry odom = this->pipeline_->register_frame(frame, utils::stamp2ns(msg_ptr->header.stamp));
-    this->first_scan_registered_.store(true);
+    const std::uint64_t scan_stamp = utils::stamp2ns(msg_ptr->header.stamp);
+    types::Odometry odom = this->pipeline_->register_frame(frame, scan_stamp);
+    // The pipeline buffers its odometry only when it registered; an empty cloud (before or after preprocessing)
+    // returns an ERROR without touching it. Only a registration consumes the told pose and closes the one shot.
+    if (this->pipeline_->get_odometry().stamp == scan_stamp) {
+      {
+        std::lock_guard<std::mutex> lock(this->initial_pose_mutex_);
+        this->pending_initial_pose_.reset();
+      }
+      this->first_scan_registered_.store(true);
+    }
 
     // Compute elapsed time
     // clang-format off

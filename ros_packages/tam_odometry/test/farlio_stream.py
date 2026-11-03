@@ -180,12 +180,14 @@ class Rig:
             self.tick()
         return scan_ok, self.pub_pose.get_subscription_count() >= 1
 
-    def publish_pose(self, pose, frame='far_lio_odom'):
+    def publish_pose(self, pose, frame='far_lio_odom', zero_quaternion=False):
         m = PoseWithCovarianceStamped()
         m.header.frame_id = frame
         m.header.stamp.sec, m.header.stamp.nanosec = divmod(int(round(self.sim_time() * 1e9)), 10 ** 9)
         m.pose.pose.position.x, m.pose.pose.position.y = pose[0], pose[1]
         m.pose.pose.orientation.z, m.pose.pose.orientation.w = math.sin(pose[2] / 2.0), math.cos(pose[2] / 2.0)
+        if zero_quaternion:
+            m.pose.pose.orientation.z = m.pose.pose.orientation.w = 0.0
         m.pose.covariance[0] = m.pose.covariance[7] = 0.25
         m.pose.covariance[35] = 0.07
         self.pub_pose.publish(m)

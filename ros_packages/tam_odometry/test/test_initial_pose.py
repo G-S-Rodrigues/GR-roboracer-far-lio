@@ -34,9 +34,12 @@ far_lio_odom). A case defines only its own test class, so no test is skipped:
     hold              FARLIO_1820  wait_initial_pose: 3 s of scans and IMU, no lidar odometry and no EKF odometry; the
                                    pose then releases both
     wrong_frame       FARLIO_1840  a pose in frame `map` is rejected with a WARN and the hold continues
+    empty_scan        FARLIO_1855  the first scan after the pose is empty (all inf): the pose is kept for the next scan
     late_pose         FARLIO_1850  a pose after the first registered scan is ignored (WARN), no jump
     wait_tf_conflict  FARLIO_1860  wait_initial_pose with wait_tf: the node refuses to start
     icp_cv_refused    FARLIO_1860  a topic on a non-EXTERNALGUESS model (tam_icp_cv): the node refuses to start
+    hold_no_topic     FARLIO_1860  wait_initial_pose with an empty input_initial_pose (it would hold forever): refuses
+    zero_quaternion   FARLIO_1840  a pose with an all-zero orientation is rejected with a WARN, the hold continues
 """
 import math
 import os
@@ -68,7 +71,11 @@ MAP_PCD = os.path.join(tempfile.mkdtemp(prefix='farlio_18xx_'), 'map.pcd')
 # 0.307 deg from T_START in all 10, worst of the 100 odometry 0.0991 m / 0.382 deg in all 10 (the run is deterministic
 # to the 4th digit); FARLIO_1850 worst 0.0755 m / 0.297 deg in all 10. Bound = 2 x the worst, 0.0991 m / 0.382 deg.
 BOUNDS_1830 = (0.20, 0.77)
-REFUSALS = ('wait_tf_conflict', 'icp_cv_refused')
+# The CUDA twin (FARLIO_1880) has its own bound: 10 runs on 2026-11-02 (raw log lost in a reboot), worst of the 100 odometry
+# 0.0991 m / 0.392 deg (0.060-0.099 m across runs), so 2 x worst = 0.20 m / 0.79 deg.
+BOUNDS_1880 = (0.20, 0.79)
+BOUNDS = BOUNDS_1880 if EXEC == 'tam_cuda_gicp_ext' else BOUNDS_1830
+REFUSALS = ('wait_tf_conflict', 'icp_cv_refused', 'hold_no_topic')
 WITH_EKF = ('hold',)
 
 
@@ -83,6 +90,9 @@ def generate_test_description():
     exe = EXEC
     if CASE == 'wait_tf_conflict':
         params['node.wait_tf'] = True
+    if CASE == 'hold_no_topic':
+        params['node.input_initial_pose'] = ''
+        params['node.wait_initial_pose'] = True
     if CASE == 'icp_cv_refused':
         exe = 'tam_icp_cv'
         params['node.input_initial_pose'] = '/core/state/initial_pose'
@@ -106,9 +116,9 @@ def check_bounds(test, poses, label):
     worst = max(pose_error(p, T_START)[0] for p in poses)
     worst_yaw = max(pose_error(p, T_START)[1] for p in poses)
     print('%s %d lidar odometry, worst %.4f m %.3f deg from T_START' % (label, len(poses), worst, worst_yaw))
-    test.assertIsNotNone(BOUNDS_1830, 'bounds measured')
-    test.assertLessEqual(worst, BOUNDS_1830[0], '%s: worst %.4f m from T_START' % (label, worst))
-    test.assertLessEqual(worst_yaw, BOUNDS_1830[1], '%s: worst %.3f deg from T_START' % (label, worst_yaw))
+    test.assertIsNotNone(BOUNDS, 'bounds measured')
+    test.assertLessEqual(worst, BOUNDS[0], '%s: worst %.4f m from T_START' % (label, worst))
+    test.assertLessEqual(worst_yaw, BOUNDS[1], '%s: worst %.3f deg from T_START' % (label, worst_yaw))
 
 
 class RigCase(unittest.TestCase):
@@ -171,6 +181,18 @@ if CASE == 'wrong_frame':
             proc_output.assertWaitFor(re.compile(r"initial pose in frame 'map' ignored: expected 'far_lio_odom'"),
                                       process=odometry, timeout=5)
 
+if CASE == 'zero_quaternion':
+    class TestZeroQuaternion(RigCase):
+
+        def test_farlio_1840_zero_quaternion_is_rejected(self, proc_output, odometry):
+            rig = self.rig
+            rig.wait_graph()
+            rig.publish_pose(compose(T_START, OFFSET), zero_quaternion=True)
+            rig.run_standing(2.0)
+            self.assertEqual(len(rig.lidar), 0, 'odometry during the hold after an all-zero orientation')
+            proc_output.assertWaitFor(re.compile(r'initial pose ignored: orientation is not a unit quaternion'),
+                                      process=odometry, timeout=5)
+
 if CASE == 'late_pose':
     class TestLatePose(RigCase):
 
@@ -192,13 +214,34 @@ if CASE == 'late_pose':
             check_bounds(self, poses, 'FARLIO_1850')
             proc_output.assertWaitFor(re.compile(r'relocalization not supported'), process=odometry, timeout=5)
 
+if CASE == 'empty_scan':
+    class TestEmptyScan(RigCase):
+
+        def test_farlio_1855_empty_scan_keeps_the_pose(self):
+            rig = self.rig
+            rig.wait_graph()
+            rig.publish_pose(compose(T_START, OFFSET))
+            rig.drain(0.5)
+            rig.tick([float('inf')] * fs.NUM_BEAMS)   # registration returns an error on this scan
+            rig.drain(0.1)
+            t0 = rig.sim_time()
+            rig.run_standing(1.0)
+            rig.drain(0.5)
+            poses = window(rig, t0)
+            self.assertGreater(len(poses), 0, 'no lidar odometry after the empty scan (status: %s)' % rig.status_summary())
+            d, dyaw = pose_error(poses[0], T_START)
+            print('FARLIO_1855 first lidar odometry after the empty scan %.4f m %.3f deg from T_START, status %s'
+                  % (d, dyaw, rig.status_summary()))
+            check_bounds(self, poses, 'FARLIO_1855')
+
 if CASE in REFUSALS:
     class TestRefusal(unittest.TestCase):
 
         def test_farlio_1860_node_refuses_to_start(self, proc_output, proc_info, odometry):
             proc_info.assertWaitForShutdown(process=odometry, timeout=10)
             names = {'wait_tf_conflict': r'wait_initial_pose.*wait_tf|wait_tf.*wait_initial_pose',
-                     'icp_cv_refused': r'input_initial_pose.*model|model.*input_initial_pose'}[CASE]
+                     'icp_cv_refused': r'input_initial_pose.*model|model.*input_initial_pose',
+                     'hold_no_topic': r'wait_initial_pose.*input_initial_pose|input_initial_pose.*wait_initial_pose'}[CASE]
             proc_output.assertWaitFor(re.compile(names), process=odometry, timeout=5)
 
     @launch_testing.post_shutdown_test()

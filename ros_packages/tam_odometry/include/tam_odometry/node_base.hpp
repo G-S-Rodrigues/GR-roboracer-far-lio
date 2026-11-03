@@ -17,6 +17,7 @@
 // Common libraries
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -471,6 +472,13 @@ protected:
     if (msg->header.frame_id != this->config_.odom_frame) {
       RCLCPP_WARN(this->get_logger(), "[%s]: initial pose in frame '%s' ignored: expected '%s'", this->get_name(),  // NOLINT
         msg->header.frame_id.c_str(), this->config_.odom_frame.c_str());
+      return;
+    }
+    // An all-zero or non-finite orientation is not a rotation: refused, as a wrong frame is
+    const auto& q = msg->pose.pose.orientation;
+    const double qnorm = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    if (!std::isfinite(qnorm) || qnorm < 1e-6) {
+      RCLCPP_WARN(this->get_logger(), "[%s]: initial pose ignored: orientation is not a unit quaternion (norm %g)", this->get_name(), qnorm);  // NOLINT
       return;
     }
     // One shot: after the first registered scan a pose would need a reset the library does not have

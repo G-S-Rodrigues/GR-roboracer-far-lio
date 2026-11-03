@@ -229,14 +229,17 @@ class TestYawFusion(unittest.TestCase):
                         f'first EKF yaw {math.degrees(yaw):.3f} deg, expected {math.degrees(yaw0):.3f}')
         self.assertLess(e_pos, TARGET_FIRST_POS_M, f'first EKF position err {e_pos:.4f} m')
         worst_pos = worst_yaw = 0.0
+        in_window = 0
         for ts, x, y, yaw in out:
             td = ts - 1.0 - WARMUP_S - stand_s     # drive time of this output
             if td < 3.9 or td > 4.1:
                 continue
+            in_window += 1
             tx = x0 + (1.0 + 2.0 * (td - 1.0)) * math.cos(yaw0)
             ty = y0 + (1.0 + 2.0 * (td - 1.0)) * math.sin(yaw0)
             worst_pos = max(worst_pos, math.hypot(x - tx, y - ty))
             worst_yaw = max(worst_yaw, abs(math.degrees(wrap(yaw - yaw0))))
+        self.assertGreater(in_window, 0, 'no EKF output in td 3.9-4.1 s: the 4 s check saw nothing')
         print(f'FARLIO_1890 {FILTER} at 4 s drive: err {worst_pos:.4f} m {worst_yaw:.3f} deg')
         self.assertLess(worst_pos, MAX_POS_ERR_M)
         self.assertLess(worst_yaw, MAX_YAW_ERR_DEG)
