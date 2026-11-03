@@ -65,6 +65,12 @@ in the part 4 hand-off. kin1080 (bound 18.1 m) is NOT tripped by 2x noise (8.751
 not monotonic in the noise), but IS tripped by 32 beams: 37.184 m, yaw 0.191 deg, path 1.1472 of the lap
 (2026-10-30). That is the named degradation of kin1080.
 
+Bite check of the re-set limits (2026-11-02, one run each at FARLIO_LAP_NOISE_X=2, fixed build): kin64 TRIPS (path 1.3307
+of the lap, over 1.12; position 48.36 m, over 23.0), nh64 TRIPS on the path band only (path 1.2039 over 1.12; position
+16.19 m and yaw 2.69 deg are inside 17.7 / 29.7), nh1080 TRIPS (position 3.578 m over 3.26), kin1080 is not tripped by 2x
+noise (8.83 m) and keeps 32 beams as its degradation (37.2 m, above). nh64's named degradation is therefore 2x noise,
+caught by the path-fraction band; 32 beams does not trip nh64 (13.96 m, path 0.955).
+
 Re-set 2026-11-02 on the build with the 2D yaw-fusion fix (FARLIO_1890; the EKF now fuses the lidar yaw). Every
 bound above that is a "2 x worst" was measured with the lidar yaw unfused, so the pre-fix yaw was the integral of the
 harness's exact simulated gyro (<= 0.19 deg for kin1080), not a measurement of the pair. research/2026-11-02-far-lio-1610-yaw-measured.md
@@ -82,7 +88,8 @@ build; why GICP fails here, and gating accepted scans on yaw, is a separate part
     nh1080   1.56 1.63 1.59 1.46 1.50 1.60 1.59 1.59 1.61 1.59                       3.28 3.52 3.28 0.81 0.44 3.33 3.32 3.32 3.29 3.32
 
     bounds (position m / yaw deg), old -> new:  kin64 17.9 / 1.37 -> 23.0 / 21.6;  kin1080 18.1 / 1.21 -> 18.1 / 6.86
-    (position bound not tightened: its 2 x worst, 9.08 m, is below the 9.035 m second mode seen on 2026-10-30);
+    (position bound not tightened: it stays at 2 x the 9.035 m second mode seen on 2026-10-30 = 18.1 m; the 2 x worst
+    of these ten runs, 9.08 m, would sit just above that mode, with no margin against a repeat of it);
     nh64 7.71 / 2.18 -> 17.7 / 29.7;  nh1080 3.03 / 0.78 -> 3.26 / 7.05.
 
 Path fraction of the estimate (10 runs): kin64 1.0570 1.0210 1.0217 1.0404 1.0179 1.0185 1.0184 1.0184 1.0241 1.0565;
@@ -130,7 +137,7 @@ PACE = float(os.environ.get('FARLIO_LAP_PACE', '1.0'))   # wall seconds per sim 
 BOUNDS = {
     # 2 x the worst of 10 runs on the fixed build, see "Re-set 2026-11-02" in the docstring
     'kin64': (23.0, 21.6),
-    'kin1080': (18.1, 6.86),   # position kept at 18.1: 2 x the 4.54 m worst would be below the 9.035 m second mode
+    'kin1080': (18.1, 6.86),   # position kept at 18.1 = 2 x the 9.035 m second mode (2 x the 4.54 m worst, 9.08 m, would pass the mode with no margin)
     'nh64': (17.7, 29.7),
     'nh1080': (3.26, 7.05),
 }
